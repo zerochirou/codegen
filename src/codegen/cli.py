@@ -6,6 +6,7 @@ import argparse
 import json
 import shutil
 import subprocess
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from codegen.init_wizard import run_init_wizard
@@ -34,18 +35,28 @@ def _run_init() -> None:
     print(f"Initialized codegen-memory in {target}")
 
 
+def _get_version() -> str:
+    """Return installed codegen package version."""
+    try:
+        return version("codegen")
+    except PackageNotFoundError:
+        return "0.1.0"
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level CLI parser."""
     parser = argparse.ArgumentParser(
         prog="codegen",
         description="codegen CLI — ChromaDB vector memory, MCP server, and MemoryTUI",
     )
+    parser.add_argument("-v", "--version", action="version", version=f"codegen {_get_version()}")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("tui", help="Launch the MemoryTUI (default when no command is given)")
     subparsers.add_parser("run", help="Run the codegen-memory MCP server")
     subparsers.add_parser("init", help="Initialize .gemini/mcp_config.json in the current project")
     subparsers.add_parser("update", help="Update the global codegen CLI from GitHub")
     subparsers.add_parser("uninstall", aliases=["remove"], help="Uninstall the global codegen CLI")
+    subparsers.add_parser("version", help="Show codegen version")
     subparsers.add_parser("help", help="Show this help message")
     return parser
 
@@ -57,6 +68,8 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "help":
         parser.print_help()
+    elif args.command == "version":
+        print(f"codegen {_get_version()}")
     elif args.command == "init":
         run_init_wizard()
     elif args.command == "update":
