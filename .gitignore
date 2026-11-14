@@ -1,16 +1,9 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-dist/
-build/
-.eggs/
-
-# Virtual environments
-.venv/
-venv/
-ENV/
+# Go build artifacts
+/bin/
+/codegen
+*.exe
+*.test
+*.out
 
 # Environment variables
 .env
@@ -23,5 +16,3 @@ chroma_data/
 .DS_Store
 .vscode/
 .idea/
-.pytest_cache/
-.ruff_cache/

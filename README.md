@@ -1,126 +1,74 @@
 # codegen
 
-MCP (Model Context Protocol) server untuk memory tools AI berbasis **ChromaDB**. Server ini memungkinkan AI menyimpan, mencari secara semantik, dan menghapus context/memory di penyimpanan vektor lokal ChromaDB.
+CLI, MCP (Model Context Protocol) server, dan MemoryTUI berbasis **100% Golang** dengan penyimpanan vektor lokal **ChromaDB** (`chroma-go` embedded PersistentClient + ONNX `all-MiniLM-L6-v2`).
 
-## Quick Start (One-Command Setup)
+## Quick Start
 
-### Opsi 1: Installer via `curl`
-
-```bash
-curl -LsSf https://raw.githubusercontent.com/zerochirou/codegen/master/scripts/install.sh | sh
-```
-
-### Opsi 2: Langsung via `uvx` / `uv tool` (tanpa clone)
+### Install dari source (Go >= 1.24)
 
 ```bash
-# Jalankan langsung tanpa install permanen
-uvx --from git+https://github.com/zerochirou/codegen codegen-mcp
-
-# Atau install global sebagai CLI tool
-uv tool install git+https://github.com/zerochirou/codegen
+go install github.com/zerochirou/codegen/cmd/codegen@latest
 ```
+
+Atau build lokal dari repo ini:
+
+```bash
+./scripts/setup.sh
+```
+
+## Perintah CLI
+
+```bash
+codegen                # Menampilkan help
+codegen --version      # Menampilkan versi (juga `codegen -v` / `codegen version`)
+codegen init           # Setup interaktif (Per-project atau Global)
+codegen tui            # Buka MemoryTUI untuk ChromaDB per-project/workspace
+codegen tui --global   # Buka MemoryTUI untuk ChromaDB global (~/.codegen/chroma_data)
+codegen run            # Jalankan MCP server (stdio)
+codegen update         # Update binary codegen via `go install`
+codegen uninstall      # Hapus binary global codegen
+```
+
+## Cara Kerja Scoping (`Per-project` vs `Global`)
+
+- **`codegen init`** (Per-project):
+  - Membuat `<project>/chroma_data` (otomatis menambahkan `/chroma_data` ke base path).
+  - Menulis `.codegen/config.json` & `.gemini/mcp_config.json` (dan plugin `.agents/plugins/codegen-memory/` jika MCP global dinamis belum aktif).
+  - Menyalin bundled skills ke `.agents/skills/`.
+- **`codegen init`** (Global):
+  - Membuat `~/.codegen/chroma_data` dan `~/.codegen/config.json`.
+  - Mendaftarkan `codegen-memory` (`codegen run`) di `~/.gemini/config/mcp_config.json` tanpa mengunci `CHROMA_PERSIST_DIR` ke satu repo, sehingga saat dijalankan di project yang sudah `codegen init`, MCP otomatis menyimpan ke `<project>/chroma_data`, dan di folder lain fallback ke global `~/.codegen/chroma_data`.
+- **`codegen tui`**:
+  - Tanpa flag: membaca ChromaDB **per-project** dari workspace saat ini.
+  - Dengan `--global` (`-g`): membaca ChromaDB **global** (`~/.codegen/chroma_data`).
+
+## MCP Tools
+
+- `save_memory(content, memory_id=None, tags=None, node_type=None, links=None, collection_name=None, workspace_path=None)`
+- `search_memory(query, n_results=5, collection_name=None, workspace_path=None)`
+- `delete_memory(memory_id, collection_name=None, workspace_path=None)`
 
 ## Struktur Project
 
 ```text
 .
-├── src/codegen/
-│   ├── __init__.py
-│   ├── chroma.py        # Helper client & collection ChromaDB
-│   └── mcp_server.py    # MCP server (save_memory, search_memory, delete_memory)
-├── tests/
-│   ├── test_chroma.py
-│   └── test_mcp_server.py
-├── .env.example
-├── pyproject.toml
-└── README.md
+├── assets.go
+├── cmd/codegen/
+│   └── main.go
+├── internal/
+│   ├── chroma/       # Path scoping + embedded ChromaDB PersistentClient (ONNX all-MiniLM-L6-v2)
+│   ├── cli/          # Cobra CLI entrypoint
+│   ├── initwizard/   # Interactive Clack-style setup wizard
+│   ├── mcp/          # Stdio MCP server (JSON-RPC 2.0 + roots/list workspace detection)
+│   └── tui/          # Bubble Tea + Lipgloss MemoryTUI
+├── .agents/skills/   # Workflow & memory skills (di-embed ke binary via go:embed)
+├── scripts/
+├── go.mod
+└── go.sum
 ```
 
-## Setup
-
-1. Install dependensi menggunakan `uv`:
+## Testing
 
 ```bash
-uv sync --extra dev
-```
-
-2. Salin konfigurasi environment:
-
-```bash
-cp .env.example .env
-```
-
-Variabel di `.env`:
-- `CHROMA_PERSIST_DIR`: direktori penyimpanan ChromaDB (default: `./chroma_data`)
-- `CHROMA_COLLECTION_NAME`: nama collection default (default: `default`)
-- `MCP_SERVER_NAME`: nama MCP server (default: `codegen-mcp`)
-
-## MCP Tools
-
-- `save_memory(content, memory_id=None, tags=None, node_type=None, links=None, collection_name=None)` — Menyimpan atau memperbarui knowledge node/memory ke ChromaDB.
-- `search_memory(query, n_results=5, collection_name=None)` — Mencari memory berdasarkan kemiripan semantik.
-- `delete_memory(memory_id, collection_name=None)` — Menghapus memory berdasarkan `memory_id`.
-
-## Skills (`/codegen`)
-
-Direktori `.agents/skills/` menyediakan workflow engineering terstruktur yang terintegrasi dengan `codegen-memory`:
-
-- **`/codegen <task>`** — Mode end-to-end (`recall` → `architect` → `impact` → `build` → `review` → `ship`) dengan **auto-checkpoint** di setiap perpindahan fase.
-- **`/recall`**, **`/architect`**, **`/impact`**, **`/build`**, **`/review`**, **`/ship`** — Skill modular untuk masing-masing fase.
-- **`/handoff`** — Simpan atau lanjutkan checkpoint aktif saat berpindah agent.
-- **`/remember`**, **`/update-memory`**, **`/forget`** — Kelola knowledge nodes (`node_type`, `links`, `tags`) di ChromaDB.
-- **`/codegen-setup`**, **`/codegen-help`** — Health check setup dan panduan referensi cepat.
-
-## Menjalankan MCP Server
-
-```bash
-uv run codegen-mcp
-```
-
-### Konfigurasi di Antigravity CLI
-
-Tambahkan ke `~/.gemini/antigravity-cli/mcp_config.json` (global) atau `.gemini/mcp_config.json` (per-project):
-
-```json
-{
-  "mcpServers": {
-    "codegen-memory": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/Users/zerochirou/Developer/Projects/codegen",
-        "run",
-        "codegen-mcp"
-      ]
-    }
-  }
-}
-```
-
-### Konfigurasi di VS Code
-
-Tambahkan ke `.vscode/mcp.json`:
-
-```json
-{
-  "servers": {
-    "codegen-memory": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/Users/zerochirou/Developer/Projects/codegen",
-        "run",
-        "codegen-mcp"
-      ]
-    }
-  }
-}
-```
-
-## Testing & Linting
-
-```bash
-uv run pytest
-uv run ruff check src tests
+go test ./...
 ```

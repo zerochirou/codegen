@@ -4,47 +4,30 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-echo "==> Setting up codegen in $ROOT_DIR"
+echo "==> Building codegen (Go CLI) in $ROOT_DIR"
 
-if ! command -v uv >/dev/null 2>&1; then
-    echo "==> uv not found. Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
+if ! command -v go >/dev/null 2>&1; then
+    echo "Error: Go (>= 1.24) is required." >&2
+    exit 1
 fi
 
-echo "==> Syncing dependencies (including dev extras)..."
-uv sync --extra dev
+INSTALL_DIR="${CODEGEN_INSTALL_DIR:-$HOME/.local/bin}"
+mkdir -p "$INSTALL_DIR"
+go build -o "$INSTALL_DIR/codegen" ./cmd/codegen
 
-if [ ! -f ".env" ]; then
-    if [ -f ".env.example" ]; then
-        echo "==> Creating .env from .env.example..."
-        cp .env.example .env
-    else
-        echo "==> Warning: .env.example not found, skipping .env creation."
-    fi
-else
-    echo "==> .env already exists, keeping existing configuration."
+echo "==> Installed binary to $INSTALL_DIR/codegen"
+
+if [ ! -f ".env" ] && [ -f ".env.example" ]; then
+    cp .env.example .env
 fi
 
-CHROMA_DIR="./chroma_data"
-if [ -f ".env" ]; then
-    ENV_CHROMA_DIR="$(grep -E '^CHROMA_PERSIST_DIR=' .env | tail -n1 | cut -d'=' -f2- || true)"
-    if [ -n "$ENV_CHROMA_DIR" ]; then
-        CHROMA_DIR="$ENV_CHROMA_DIR"
-    fi
-fi
-
-mkdir -p "$CHROMA_DIR"
-echo "==> ChromaDB directory ready: $CHROMA_DIR"
-
-if command -v agy >/dev/null 2>&1; then
-    echo "==> Registering codegen-memory in Antigravity CLI (agy)..."
-    agy mcp add --env "CHROMA_PERSIST_DIR=$ROOT_DIR/$CHROMA_DIR" codegen-memory -- uv --directory "$ROOT_DIR" run codegen-mcp || true
-fi
+echo "==> Running tests..."
+go test ./...
 
 echo ""
 echo "Setup complete! Useful commands:"
-echo "  uv run codegen-mcp          # Run MCP server"
-echo "  uv run codegen-tui          # Run TUI"
-echo "  uv run pytest               # Run tests"
-echo "  uv run ruff check src tests # Run linter"
+echo "  codegen --help        # Show CLI help"
+echo "  codegen init          # Configure per-project or global ChromaDB + MCP + skills"
+echo "  codegen tui           # Inspect per-project ChromaDB memory"
+echo "  codegen tui --global  # Inspect global ChromaDB memory"
+echo "  codegen run           # Run MCP stdio server"

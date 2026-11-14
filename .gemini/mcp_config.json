@@ -1,13 +1,13 @@
 {
   "mcpServers": {
     "codegen-memory": {
-      "command": "uv",
+      "command": "codegen",
       "args": [
-        "--directory",
-        "/Users/zerochirou/Developer/Projects/codegen",
-        "run",
-        "codegen-mcp"
-      ]
+        "run"
+      ],
+      "env": {
+        "CHROMA_PERSIST_DIR": "./chroma_data"
+      }
     }
   }
 }
