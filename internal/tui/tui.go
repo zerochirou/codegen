@@ -24,28 +24,28 @@ const (
 )
 
 var categoryColors = []lipgloss.Color{
-	lipgloss.Color("#eeeeee"),
 	lipgloss.Color("#ffe08a"),
-	lipgloss.Color("#d0d0d0"),
-	lipgloss.Color("#a3a3a3"),
-	lipgloss.Color("#8a8a8a"),
-	lipgloss.Color("#525252"),
+	lipgloss.Color("#58a6ff"),
+	lipgloss.Color("#3fb950"),
+	lipgloss.Color("#a371f7"),
+	lipgloss.Color("#38bdf8"),
+	lipgloss.Color("#f778ba"),
 }
 
-// fx.sh monochrome + warm-amber terminal palette
+// fx.sh monochrome + warm-amber terminal palette.
+// Containers omit explicit Background so inner ANSI resets never leave patchy seams.
 const (
-	fxBgBase       = lipgloss.Color("#000000")
-	fxBgCard       = lipgloss.Color("#0a0a0a")
-	fxBgElevated   = lipgloss.Color("#171717")
-	fxBorderRail   = lipgloss.Color("#262626")
-	fxBorderFocus  = lipgloss.Color("#d0d0d0")
-	fxFgBright     = lipgloss.Color("#eeeeee")
-	fxFgAuto       = lipgloss.Color("#d0d0d0")
-	fxFgDim        = lipgloss.Color("#8a8a8a")
-	fxAccentInvBg  = lipgloss.Color("#ededed")
-	fxAccentInvFg  = lipgloss.Color("#000000")
-	fxAmber        = lipgloss.Color("#ffe08a")
-	fxDestructive  = lipgloss.Color("#f36356")
+	fxBgElevated  = lipgloss.Color("#171717")
+	fxBorderRail  = lipgloss.Color("#262626")
+	fxBorderFocus = lipgloss.Color("#d0d0d0")
+	fxFgBright    = lipgloss.Color("#eeeeee")
+	fxFgAuto      = lipgloss.Color("#d0d0d0")
+	fxFgDim       = lipgloss.Color("#8a8a8a")
+	fxGridEmpty   = lipgloss.Color("#333333")
+	fxAccentInvBg = lipgloss.Color("#ededed")
+	fxAccentInvFg = lipgloss.Color("#000000")
+	fxAmber       = lipgloss.Color("#ffe08a")
+	fxDestructive = lipgloss.Color("#f36356")
 )
 
 type recordView struct {
@@ -124,7 +124,7 @@ func Run(opts Options) error {
 	defer func() { _ = store.Close() }()
 
 	m := NewModel(store, opts)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = p.Run()
 	return err
 }
@@ -207,16 +207,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusText = fmt.Sprintf("Deleted %s", truncate(msg.id, 12))
 		return m, m.loadMemoriesCmd(m.search.Value())
 
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
 	case tea.KeyMsg:
 		if m.searching {
 			switch msg.String() {
 			case "esc":
-				m.searching = false
-				m.search.Blur()
+				m.blurSearch()
 				return m, nil
 			case "enter":
-				m.searching = false
-				m.search.Blur()
+				m.blurSearch()
 				return m, m.loadMemoriesCmd(m.search.Value())
 			}
 			var cmd tea.Cmd
@@ -231,9 +232,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "/":
-			m.searching = true
-			m.search.Focus()
-			return m, textinput.Blink
+			return m, m.focusSearch()
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % 2
 			return m, nil
@@ -247,18 +246,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusText = "Memories reloaded."
 			return m, m.loadMemoriesCmd(m.search.Value())
 		case "up", "k":
-			if m.activeTab == 0 && m.cursor > 0 {
-				m.cursor--
-				m.syncDetailViewport()
-			} else if m.activeTab == 1 {
+			if m.activeTab == 0 {
+				m.moveCursor(-1)
+			} else {
 				m.viewport.ScrollUp(1)
 			}
 			return m, nil
 		case "down", "j":
-			if m.activeTab == 0 && m.cursor < len(m.records)-1 {
-				m.cursor++
-				m.syncDetailViewport()
-			} else if m.activeTab == 1 {
+			if m.activeTab == 0 {
+				m.moveCursor(1)
+			} else {
 				m.viewport.ScrollDown(1)
 			}
 			return m, nil
@@ -287,9 +284,101 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) focusSearch() tea.Cmd {
+	m.searching = true
+	m.search.Focus()
+	return textinput.Blink
+}
+
+func (m *Model) blurSearch() {
+	m.searching = false
+	m.search.Blur()
+}
+
+func (m *Model) moveCursor(delta int) {
+	if len(m.records) == 0 {
+		return
+	}
+	next := min(len(m.records)-1, max(0, m.cursor+delta))
+	if next != m.cursor {
+		m.cursor = next
+		m.syncDetailViewport()
+	}
+}
+
+func (m Model) listVisibleWindow() (start, end int) {
+	bodyH := max(10, m.height-12)
+	maxRows := max(3, bodyH-4)
+	if m.cursor >= maxRows {
+		start = m.cursor - maxRows + 1
+	}
+	end = min(len(m.records), start+maxRows)
+	return start, end
+}
+
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+		if m.activeTab != 0 {
+			return m, nil
+		}
+		if msg.X <= m.leftPaneWidth()+1 {
+			delta := -1
+			if msg.Button == tea.MouseButtonWheelDown {
+				delta = 1
+			}
+			m.moveCursor(delta)
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
+	}
+
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+
+	// Top bar spans Y = 2..4 (search box, count badge, reload button).
+	if msg.Y >= 2 && msg.Y <= 4 {
+		top := m.renderTopBarParts()
+		if msg.X >= 0 && msg.X < top.searchEndX {
+			return m, m.focusSearch()
+		}
+		m.blurSearch()
+		if msg.X >= top.reloadStartX && msg.X < top.reloadEndX {
+			m.statusText = "Memories reloaded."
+			return m, m.loadMemoriesCmd(m.search.Value())
+		}
+		return m, nil
+	}
+
+	m.blurSearch()
+
+	// Tab strip sits on Y = 5.
+	if msg.Y == 5 {
+		_, tab0W, tab1W := m.renderTabs()
+		if msg.X >= 0 && msg.X < tab0W {
+			m.activeTab = 0
+		} else if msg.X >= tab0W && msg.X < tab0W+tab1W {
+			m.activeTab = 1
+		}
+		return m, nil
+	}
+
+	// Body starts at Y = 6 (border at Y=6, column header at Y=7, rows start at Y=8).
+	if m.activeTab == 0 && msg.X <= m.leftPaneWidth()+1 && msg.Y >= 8 {
+		start, end := m.listVisibleWindow()
+		idx := start + (msg.Y - 8)
+		if idx >= start && idx < end && idx != m.cursor {
+			m.cursor = idx
+			m.syncDetailViewport()
+		}
+	}
+	return m, nil
+}
+
 func (m *Model) syncLayout() {
-	searchW := max(20, m.width-34)
-	m.search.Width = searchW
+	m.search.Width = max(14, m.width-38)
 
 	bodyH := max(10, m.height-12)
 	rightW := max(24, m.width-m.leftPaneWidth()-8)
@@ -326,6 +415,88 @@ func (m Model) selectedRecord() (recordView, bool) {
 	return m.records[m.cursor], true
 }
 
+type topBarParts struct {
+	searchBox    string
+	badgeBox     string
+	reloadBtn    string
+	searchEndX   int
+	badgeStartX  int
+	badgeEndX    int
+	reloadStartX int
+	reloadEndX   int
+}
+
+func (m Model) countLabel() string {
+	if strings.TrimSpace(m.search.Value()) != "" {
+		return fmt.Sprintf("%d matches", len(m.records))
+	}
+	if len(m.records) == 1 {
+		return "1 memory"
+	}
+	return fmt.Sprintf("%d memories", len(m.records))
+}
+
+func (m Model) renderTopBarParts() topBarParts {
+	badgeBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(fxBorderRail).
+		Foreground(fxFgAuto).
+		Padding(0, 1).
+		Render(m.countLabel())
+
+	reloadBtn := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(fxBorderRail).
+		Foreground(fxFgBright).
+		Padding(0, 1).
+		Render("↻ Reload")
+
+	badgeW := lipgloss.Width(badgeBox)
+	reloadW := lipgloss.Width(reloadBtn)
+	// Reserve 2 gap cols between boxes and 2 border cols for searchBox.
+	searchInnerW := max(20, m.width-badgeW-reloadW-4)
+
+	searchBorder := fxBorderRail
+	if m.searching {
+		searchBorder = fxBorderFocus
+	}
+	searchBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(searchBorder).
+		Padding(0, 1).
+		Width(searchInnerW).
+		Render(m.search.View())
+
+	searchW := lipgloss.Width(searchBox)
+	badgeStart := searchW + 1
+	badgeEnd := badgeStart + badgeW
+	reloadStart := badgeEnd + 1
+	reloadEnd := reloadStart + reloadW
+	return topBarParts{
+		searchBox:    searchBox,
+		badgeBox:     badgeBox,
+		reloadBtn:    reloadBtn,
+		searchEndX:   searchW,
+		badgeStartX:  badgeStart,
+		badgeEndX:    badgeEnd,
+		reloadStartX: reloadStart,
+		reloadEndX:   reloadEnd,
+	}
+}
+
+func (m Model) renderTabs() (string, int, int) {
+	tab0Style := lipgloss.NewStyle().Padding(0, 2).Foreground(fxFgDim)
+	tab1Style := lipgloss.NewStyle().Padding(0, 2).Foreground(fxFgDim)
+	if m.activeTab == 0 {
+		tab0Style = tab0Style.Foreground(fxFgBright).Bold(true).Underline(true)
+	} else {
+		tab1Style = tab1Style.Foreground(fxFgBright).Bold(true).Underline(true)
+	}
+	tab0 := tab0Style.Render("1 Inspector")
+	tab1 := tab1Style.Render("2 Session Context")
+	return lipgloss.JoinHorizontal(lipgloss.Top, tab0, tab1), lipgloss.Width(tab0), lipgloss.Width(tab1)
+}
+
 func (m Model) View() string {
 	scopeBadge := lipgloss.NewStyle().
 		Bold(true).
@@ -343,53 +514,19 @@ func (m Model) View() string {
 	}
 
 	titleText := lipgloss.NewStyle().Foreground(fxFgBright).Bold(true).Render("▸ codegen")
-	pathText := lipgloss.NewStyle().Foreground(fxFgDim).Render(m.opts.PersistDir)
+	pathDisplay := truncateStart(m.opts.PersistDir, max(12, m.width-24))
+	pathText := lipgloss.NewStyle().Foreground(fxFgDim).Render(pathDisplay)
 	header := lipgloss.NewStyle().
-		Background(fxBgCard).
 		Border(lipgloss.NormalBorder(), false, false, true, false).
 		BorderForeground(fxBorderRail).
 		Padding(0, 1).
 		Width(m.width).
 		Render(fmt.Sprintf("%s  %s  %s", titleText, scopeBadge, pathText))
 
-	countLabel := fmt.Sprintf("%d memories", len(m.records))
-	if len(m.records) == 1 {
-		countLabel = "1 memory"
-	}
-	if strings.TrimSpace(m.search.Value()) != "" {
-		countLabel = fmt.Sprintf("%d matches", len(m.records))
-	}
+	top := m.renderTopBarParts()
+	topBar := lipgloss.JoinHorizontal(lipgloss.Center, top.searchBox, " ", top.badgeBox, " ", top.reloadBtn)
 
-	searchBorder := fxBorderRail
-	if m.searching {
-		searchBorder = fxBorderFocus
-	}
-	searchBox := lipgloss.NewStyle().
-		Background(fxBgCard).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(searchBorder).
-		Padding(0, 1).
-		Width(max(24, m.width-24)).
-		Render(m.search.View())
-
-	badgeBox := lipgloss.NewStyle().
-		Background(fxBgCard).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(fxBorderRail).
-		Foreground(fxFgAuto).
-		Padding(0, 2).
-		Render(countLabel)
-
-	topBar := lipgloss.JoinHorizontal(lipgloss.Center, searchBox, " ", badgeBox)
-
-	tab0Style := lipgloss.NewStyle().Padding(0, 2).Foreground(fxFgDim)
-	tab1Style := lipgloss.NewStyle().Padding(0, 2).Foreground(fxFgDim)
-	if m.activeTab == 0 {
-		tab0Style = tab0Style.Foreground(fxFgBright).Bold(true).Underline(true)
-	} else {
-		tab1Style = tab1Style.Foreground(fxFgBright).Bold(true).Underline(true)
-	}
-	tabs := lipgloss.JoinHorizontal(lipgloss.Top, tab0Style.Render("1 Inspector"), tab1Style.Render("2 Session Context"))
+	tabs, _, _ := m.renderTabs()
 
 	var body string
 	if m.activeTab == 0 {
@@ -406,13 +543,12 @@ func (m Model) View() string {
 	}
 
 	footer := lipgloss.NewStyle().
-		Background(fxBgCard).
 		Border(lipgloss.NormalBorder(), true, false, false, false).
 		BorderForeground(fxBorderRail).
 		Foreground(fxFgDim).
 		Padding(0, 1).
 		Width(m.width).
-		Render("q quit  ·  / search  ·  ↑/↓ navigate  ·  Tab switch view  ·  r reload  ·  c copy  ·  d delete")
+		Render("q quit · / search · click/↑↓ · Tab view · r reload · c copy · d del")
 
 	parts := []string{header, topBar, tabs, body}
 	if statusLine != "" {
@@ -420,7 +556,6 @@ func (m Model) View() string {
 	}
 	parts = append(parts, footer)
 	return lipgloss.NewStyle().
-		Background(fxBgBase).
 		Foreground(fxFgBright).
 		Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
@@ -436,12 +571,7 @@ func (m Model) renderInspector() string {
 	)
 	rows = append(rows, hdr)
 
-	maxRows := max(3, bodyH-4)
-	start := 0
-	if m.cursor >= maxRows {
-		start = m.cursor - maxRows + 1
-	}
-	end := min(len(m.records), start+maxRows)
+	start, end := m.listVisibleWindow()
 
 	for i := start; i < end; i++ {
 		rec := m.records[i]
@@ -450,15 +580,14 @@ func (m Model) renderInspector() string {
 		previewW := max(10, leftW-36)
 		preview := truncate(strings.ReplaceAll(rec.Record.Content, "\n", " "), previewW)
 		if i == m.cursor {
-			marker := lipgloss.NewStyle().Foreground(fxAmber).Bold(true).Render("▸")
-			line := fmt.Sprintf("%s %-10s %-5s %-13s %s", marker, shortID, rec.Match, tags, preview)
-			line = lipgloss.NewStyle().
+			marker := lipgloss.NewStyle().Background(fxBgElevated).Foreground(fxAmber).Bold(true).Render("▸")
+			rest := lipgloss.NewStyle().
 				Background(fxBgElevated).
 				Foreground(fxFgBright).
 				Bold(true).
-				Width(leftW - 4).
-				Render(line)
-			rows = append(rows, line)
+				Width(max(1, leftW-5)).
+				Render(fmt.Sprintf(" %-10s %-5s %-13s %s", shortID, rec.Match, tags, preview))
+			rows = append(rows, marker+rest)
 		} else {
 			line := fmt.Sprintf("  %-10s %-5s %-13s %s", shortID, rec.Match, tags, preview)
 			line = lipgloss.NewStyle().Foreground(fxFgAuto).Render(line)
@@ -472,7 +601,6 @@ func (m Model) renderInspector() string {
 	leftPane := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(fxBorderRail).
-		Background(fxBgCard).
 		Padding(0, 1).
 		Width(leftW).
 		Height(bodyH).
@@ -504,7 +632,6 @@ func (m Model) renderInspector() string {
 	rightPane := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(fxBorderRail).
-		Background(fxBgCard).
 		Foreground(fxFgBright).
 		Padding(0, 1).
 		Width(rightW).
@@ -555,7 +682,7 @@ func (m Model) renderContextMap() string {
 			break
 		}
 	}
-	emptyCell := lipgloss.NewStyle().Foreground(fxBorderRail).Render("□")
+	emptyCell := lipgloss.NewStyle().Foreground(fxGridEmpty).Render("□")
 	for len(cells) < gridCells {
 		cells = append(cells, emptyCell)
 	}
@@ -593,7 +720,6 @@ func (m Model) renderContextMap() string {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(fxBorderRail).
-		Background(fxBgCard).
 		Foreground(fxFgAuto).
 		Padding(1, 2).
 		Width(max(40, m.width-2)).
@@ -627,6 +753,17 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen-1]) + "…"
+}
+
+func truncateStart(s string, maxLen int) string {
+	if maxLen <= 1 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return "…" + string(runes[len(runes)-(maxLen-1):])
 }
 
 func wrapText(s string, width int) string {
