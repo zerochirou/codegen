@@ -173,16 +173,17 @@ def run_init_wizard() -> None:
     project_dir = Path.cwd()
     if is_project:
         name = _prompt_text("Project name:", default=project_dir.name)
-        default_chroma = str(project_dir / "chroma_data")
+        default_chroma = str(project_dir)
         mcp_path = project_dir / ".gemini" / "mcp_config.json"
         skills_path = project_dir / ".agents" / "skills"
     else:
         name = "global"
-        default_chroma = str(Path.home() / ".codegen" / "chroma_data")
+        default_chroma = str(Path.home() / ".codegen")
         mcp_path = Path.home() / ".gemini" / "antigravity-cli" / "mcp_config.json"
         skills_path = Path.home() / ".gemini" / "antigravity-cli" / "skills"
 
-    chroma_dir = _prompt_text("ChromaDB storage path:", default=default_chroma)
+    chroma_input = Path(_prompt_text("ChromaDB storage path:", default=default_chroma)).expanduser()
+    chroma_dir = str(chroma_input if chroma_input.name == "chroma_data" else chroma_input / "chroma_data")
     install_skills = _prompt_select("Install agent skills?", ["Yes", "No"]) == "Yes"
 
     print(f"{DIM}│{RESET}")
