@@ -1,5 +1,6 @@
 """ChromaDB client and collection helpers."""
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -12,9 +13,40 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _read_mcp_persist_dir(config_path: Path) -> Path | None:
+    """Read CHROMA_PERSIST_DIR from an mcp_config.json file if present."""
+    if not config_path.is_file():
+        return None
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        raw = data.get("mcpServers", {}).get("codegen-memory", {}).get("env", {}).get("CHROMA_PERSIST_DIR")
+        if not raw:
+            return None
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = (config_path.parent.parent / path).resolve()
+        return path
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+
+
+def resolve_persist_dir(is_global: bool = False) -> Path:
+    """Resolve the ChromaDB persistence directory for project or global scope."""
+    if is_global:
+        global_mcp = Path.home() / ".gemini" / "antigravity-cli" / "mcp_config.json"
+        return _read_mcp_persist_dir(global_mcp) or (Path.home() / ".codegen" / "chroma_data")
+
+    env_dir = os.getenv("CHROMA_PERSIST_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser()
+
+    project_mcp = Path.cwd() / ".gemini" / "mcp_config.json"
+    return _read_mcp_persist_dir(project_mcp) or (Path.cwd() / "chroma_data")
+
+
 def get_persist_dir() -> Path:
     """Return the configured ChromaDB persistence directory."""
-    return Path(os.getenv("CHROMA_PERSIST_DIR", "./chroma_data"))
+    return resolve_persist_dir(is_global=False)
 
 
 def get_default_collection_name() -> str:

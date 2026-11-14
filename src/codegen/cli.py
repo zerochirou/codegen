@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from codegen.chroma import resolve_persist_dir
 from codegen.init_wizard import run_init_wizard
 from codegen.mcp_server import main as mcp_main
 from codegen.tui import main as tui_main
@@ -51,7 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("-v", "--version", action="version", version=f"codegen {_get_version()}")
     subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser("tui", help="Launch the MemoryTUI (default when no command is given)")
+    tui_parser = subparsers.add_parser("tui", help="Launch the MemoryTUI")
+    tui_parser.add_argument(
+        "-g",
+        "--global",
+        dest="is_global",
+        action="store_true",
+        help="Use the global codegen memory database (~/.codegen/chroma_data)",
+    )
     subparsers.add_parser("run", help="Run the codegen-memory MCP server")
     subparsers.add_parser("init", help="Initialize .gemini/mcp_config.json in the current project")
     subparsers.add_parser("update", help="Update the global codegen CLI from GitHub")
@@ -87,5 +96,9 @@ def main(argv: list[str] | None = None) -> None:
         subprocess.run(["uv", "tool", "uninstall", "codegen"], check=False)
     elif args.command == "run":
         mcp_main()
-    else:
+    elif args.command == "tui":
+        persist_dir = resolve_persist_dir(is_global=args.is_global)
+        os.environ["CHROMA_PERSIST_DIR"] = str(persist_dir)
         tui_main()
+    else:
+        parser.print_help()

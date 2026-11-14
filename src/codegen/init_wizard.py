@@ -173,7 +173,7 @@ def run_init_wizard() -> None:
     project_dir = Path.cwd()
     if is_project:
         name = _prompt_text("Project name:", default=project_dir.name)
-        default_chroma = "./chroma_data"
+        default_chroma = str(project_dir / "chroma_data")
         mcp_path = project_dir / ".gemini" / "mcp_config.json"
         skills_path = project_dir / ".agents" / "skills"
     else:
@@ -198,6 +198,7 @@ def run_init_wizard() -> None:
         print(f"{DIM}└{RESET}  Cancelled.\n")
         return
 
+    Path(chroma_dir).expanduser().mkdir(parents=True, exist_ok=True)
     _write_mcp_config(mcp_path, chroma_dir)
     installed = _install_skills(skills_path, is_project) if install_skills else 0
     print(f"{GREEN}└{RESET}  Done! MCP configured at {mcp_path} ({installed} skills ready).\n")
