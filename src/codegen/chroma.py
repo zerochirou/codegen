@@ -60,3 +60,12 @@ def query_documents(
     """Query similar documents from a ChromaDB collection."""
     collection = get_collection(name=collection_name, client=client)
     return collection.query(query_texts=query_texts, n_results=n_results)
+
+
+def list_documents(
+    collection_name: str | None = None,
+    client: ClientAPI | None = None,
+) -> dict[str, Any]:
+    """List all documents stored in a ChromaDB collection."""
+    collection = get_collection(name=collection_name, client=client)
+    return collection.get()

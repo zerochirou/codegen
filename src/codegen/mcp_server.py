@@ -19,13 +19,19 @@ def save_memory(
     content: str,
     memory_id: str | None = None,
     tags: list[str] | None = None,
+    node_type: str | None = None,
+    links: list[str] | None = None,
     collection_name: str | None = None,
 ) -> dict[str, Any]:
-    """Save or update an AI memory/context entry in ChromaDB."""
+    """Save or update an AI memory/knowledge node in ChromaDB."""
     doc_id = memory_id or str(uuid.uuid4())
     metadata: dict[str, Any] = {}
     if tags:
         metadata["tags"] = ",".join(tags)
+    if node_type:
+        metadata["node_type"] = node_type
+    if links:
+        metadata["links"] = ",".join(links)
 
     add_documents(
         documents=[content],

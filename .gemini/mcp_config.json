@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "codegen-memory": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/Users/zerochirou/Developer/Projects/codegen",
+        "run",
+        "codegen-mcp"
+      ]
+    }
+  }
+}

@@ -8,6 +8,7 @@ dependencies = [
     "chromadb>=0.5.0",
     "mcp>=1.0.0",
     "python-dotenv>=1.0.0",
+    "textual>=0.80.0",
 ]
 
 [project.optional-dependencies]
@@ -17,7 +18,9 @@ dev = [
 ]
 
 [project.scripts]
+codegen = "codegen.cli:main"
 codegen-mcp = "codegen.mcp_server:main"
+codegen-tui = "codegen.tui:main"
 
 [build-system]
 requires = ["hatchling"]
