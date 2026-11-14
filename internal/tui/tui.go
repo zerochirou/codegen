@@ -24,13 +24,29 @@ const (
 )
 
 var categoryColors = []lipgloss.Color{
-	lipgloss.Color("#58a6ff"),
-	lipgloss.Color("#38bdf8"),
-	lipgloss.Color("#a371f7"),
-	lipgloss.Color("#3fb950"),
-	lipgloss.Color("#d29922"),
-	lipgloss.Color("#f778ba"),
+	lipgloss.Color("#eeeeee"),
+	lipgloss.Color("#ffe08a"),
+	lipgloss.Color("#d0d0d0"),
+	lipgloss.Color("#a3a3a3"),
+	lipgloss.Color("#8a8a8a"),
+	lipgloss.Color("#525252"),
 }
+
+// fx.sh monochrome + warm-amber terminal palette
+const (
+	fxBgBase       = lipgloss.Color("#000000")
+	fxBgCard       = lipgloss.Color("#0a0a0a")
+	fxBgElevated   = lipgloss.Color("#171717")
+	fxBorderRail   = lipgloss.Color("#262626")
+	fxBorderFocus  = lipgloss.Color("#d0d0d0")
+	fxFgBright     = lipgloss.Color("#eeeeee")
+	fxFgAuto       = lipgloss.Color("#d0d0d0")
+	fxFgDim        = lipgloss.Color("#8a8a8a")
+	fxAccentInvBg  = lipgloss.Color("#ededed")
+	fxAccentInvFg  = lipgloss.Color("#000000")
+	fxAmber        = lipgloss.Color("#ffe08a")
+	fxDestructive  = lipgloss.Color("#f36356")
+)
 
 type recordView struct {
 	Record chroma.Record
@@ -73,6 +89,11 @@ type Model struct {
 // NewModel constructs a MemoryTUI Model.
 func NewModel(store *chroma.Store, opts Options) Model {
 	ti := textinput.New()
+	ti.Prompt = "> "
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(fxAmber).Bold(true)
+	ti.TextStyle = lipgloss.NewStyle().Foreground(fxFgBright)
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(fxFgDim)
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(fxFgBright)
 	ti.Placeholder = "Search context semantically by meaning, keyword, or #tag..."
 	ti.CharLimit = 256
 	ti.Width = 50
@@ -270,10 +291,10 @@ func (m *Model) syncLayout() {
 	searchW := max(20, m.width-34)
 	m.search.Width = searchW
 
-	bodyH := max(10, m.height-11)
+	bodyH := max(10, m.height-12)
 	rightW := max(24, m.width-m.leftPaneWidth()-8)
 	m.viewport.Width = rightW
-	m.viewport.Height = max(6, bodyH-6)
+	m.viewport.Height = max(6, bodyH-5)
 	m.syncDetailViewport()
 }
 
@@ -306,35 +327,30 @@ func (m Model) selectedRecord() (recordView, bool) {
 }
 
 func (m Model) View() string {
-	bg := lipgloss.Color("#161b22")
-	border := lipgloss.Color("#30363d")
-	accent := lipgloss.Color("#58a6ff")
-	purple := lipgloss.Color("#a371f7")
-	muted := lipgloss.Color("#8b949e")
-	fg := lipgloss.Color("#e6edf3")
-
 	scopeBadge := lipgloss.NewStyle().
 		Bold(true).
 		Padding(0, 1).
-		Background(lipgloss.Color("#1f6feb")).
-		Foreground(fg).
+		Background(fxAccentInvBg).
+		Foreground(fxAccentInvFg).
 		Render("PROJECT")
 	if m.opts.IsGlobal {
 		scopeBadge = lipgloss.NewStyle().
 			Bold(true).
 			Padding(0, 1).
-			Background(lipgloss.Color("#8957e5")).
-			Foreground(fg).
+			Background(fxAmber).
+			Foreground(fxAccentInvFg).
 			Render("GLOBAL")
 	}
 
+	titleText := lipgloss.NewStyle().Foreground(fxFgBright).Bold(true).Render("▸ codegen")
+	pathText := lipgloss.NewStyle().Foreground(fxFgDim).Render(m.opts.PersistDir)
 	header := lipgloss.NewStyle().
-		Background(bg).
-		Foreground(accent).
-		Bold(true).
+		Background(fxBgCard).
+		Border(lipgloss.NormalBorder(), false, false, true, false).
+		BorderForeground(fxBorderRail).
 		Padding(0, 1).
 		Width(m.width).
-		Render(fmt.Sprintf("Codegen Memory  %s  %s", scopeBadge, lipgloss.NewStyle().Foreground(muted).Bold(false).Render(m.opts.PersistDir)))
+		Render(fmt.Sprintf("%s  %s  %s", titleText, scopeBadge, pathText))
 
 	countLabel := fmt.Sprintf("%d memories", len(m.records))
 	if len(m.records) == 1 {
@@ -344,11 +360,12 @@ func (m Model) View() string {
 		countLabel = fmt.Sprintf("%d matches", len(m.records))
 	}
 
-	searchBorder := border
+	searchBorder := fxBorderRail
 	if m.searching {
-		searchBorder = accent
+		searchBorder = fxBorderFocus
 	}
 	searchBox := lipgloss.NewStyle().
+		Background(fxBgCard).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(searchBorder).
 		Padding(0, 1).
@@ -356,60 +373,66 @@ func (m Model) View() string {
 		Render(m.search.View())
 
 	badgeBox := lipgloss.NewStyle().
+		Background(fxBgCard).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(border).
-		Foreground(accent).
+		BorderForeground(fxBorderRail).
+		Foreground(fxFgAuto).
 		Padding(0, 2).
 		Render(countLabel)
 
 	topBar := lipgloss.JoinHorizontal(lipgloss.Center, searchBox, " ", badgeBox)
 
-	tab0Style := lipgloss.NewStyle().Padding(0, 2).Foreground(muted)
-	tab1Style := lipgloss.NewStyle().Padding(0, 2).Foreground(muted)
+	tab0Style := lipgloss.NewStyle().Padding(0, 2).Foreground(fxFgDim)
+	tab1Style := lipgloss.NewStyle().Padding(0, 2).Foreground(fxFgDim)
 	if m.activeTab == 0 {
-		tab0Style = tab0Style.Foreground(accent).Bold(true).Underline(true)
+		tab0Style = tab0Style.Foreground(fxFgBright).Bold(true).Underline(true)
 	} else {
-		tab1Style = tab1Style.Foreground(accent).Bold(true).Underline(true)
+		tab1Style = tab1Style.Foreground(fxFgBright).Bold(true).Underline(true)
 	}
 	tabs := lipgloss.JoinHorizontal(lipgloss.Top, tab0Style.Render("1 Inspector"), tab1Style.Render("2 Session Context"))
 
 	var body string
 	if m.activeTab == 0 {
-		body = m.renderInspector(bg, border, accent, purple, muted, fg)
+		body = m.renderInspector()
 	} else {
-		body = m.renderContextMap(bg, border, muted, fg)
+		body = m.renderContextMap()
 	}
 
 	statusLine := ""
 	if m.errText != "" {
-		statusLine = lipgloss.NewStyle().Foreground(lipgloss.Color("#f85149")).Render("Error: " + m.errText)
+		statusLine = lipgloss.NewStyle().Foreground(fxDestructive).Padding(0, 1).Render("Error: " + m.errText)
 	} else if m.statusText != "" {
-		statusLine = lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950")).Render(m.statusText)
+		statusLine = lipgloss.NewStyle().Foreground(fxAmber).Padding(0, 1).Render("▸ " + m.statusText)
 	}
 
 	footer := lipgloss.NewStyle().
-		Background(bg).
-		Foreground(muted).
+		Background(fxBgCard).
+		Border(lipgloss.NormalBorder(), true, false, false, false).
+		BorderForeground(fxBorderRail).
+		Foreground(fxFgDim).
 		Padding(0, 1).
 		Width(m.width).
-		Render("q quit  / search  ↑/↓ navigate  Tab switch view  r reload  c copy  d delete")
+		Render("q quit  ·  / search  ·  ↑/↓ navigate  ·  Tab switch view  ·  r reload  ·  c copy  ·  d delete")
 
 	parts := []string{header, topBar, tabs, body}
 	if statusLine != "" {
 		parts = append(parts, statusLine)
 	}
 	parts = append(parts, footer)
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return lipgloss.NewStyle().
+		Background(fxBgBase).
+		Foreground(fxFgBright).
+		Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 
-func (m Model) renderInspector(bg, border, accent, purple, muted, fg lipgloss.Color) string {
-	bodyH := max(10, m.height-10)
+func (m Model) renderInspector() string {
+	bodyH := max(10, m.height-12)
 	leftW := m.leftPaneWidth()
 	rightW := max(24, m.width-leftW-5)
 
 	var rows []string
-	hdr := lipgloss.NewStyle().Bold(true).Foreground(accent).Render(
-		fmt.Sprintf("%-11s %-5s %-14s %s", "ID", "Match", "Tags", "Preview"),
+	hdr := lipgloss.NewStyle().Bold(true).Foreground(fxFgDim).Render(
+		fmt.Sprintf("  %-10s %-5s %-13s %s", "ID", "Match", "Tags", "Preview"),
 	)
 	rows = append(rows, hdr)
 
@@ -422,31 +445,34 @@ func (m Model) renderInspector(bg, border, accent, purple, muted, fg lipgloss.Co
 
 	for i := start; i < end; i++ {
 		rec := m.records[i]
-		shortID := truncate(rec.Record.ID, 10)
-		tags := truncate(rec.Record.Metadata["tags"], 13)
+		shortID := truncate(rec.Record.ID, 9)
+		tags := truncate(rec.Record.Metadata["tags"], 12)
 		previewW := max(10, leftW-36)
 		preview := truncate(strings.ReplaceAll(rec.Record.Content, "\n", " "), previewW)
-		line := fmt.Sprintf("%-11s %-5s %-14s %s", shortID, rec.Match, tags, preview)
 		if i == m.cursor {
+			marker := lipgloss.NewStyle().Foreground(fxAmber).Bold(true).Render("▸")
+			line := fmt.Sprintf("%s %-10s %-5s %-13s %s", marker, shortID, rec.Match, tags, preview)
 			line = lipgloss.NewStyle().
-				Background(lipgloss.Color("#1f6feb")).
-				Foreground(fg).
+				Background(fxBgElevated).
+				Foreground(fxFgBright).
 				Bold(true).
 				Width(leftW - 4).
 				Render(line)
+			rows = append(rows, line)
 		} else {
-			line = lipgloss.NewStyle().Foreground(fg).Render(line)
+			line := fmt.Sprintf("  %-10s %-5s %-13s %s", shortID, rec.Match, tags, preview)
+			line = lipgloss.NewStyle().Foreground(fxFgAuto).Render(line)
+			rows = append(rows, line)
 		}
-		rows = append(rows, line)
 	}
 	if len(m.records) == 0 {
-		rows = append(rows, lipgloss.NewStyle().Foreground(muted).Render("(empty — no memories found)"))
+		rows = append(rows, lipgloss.NewStyle().Foreground(fxFgDim).Render("  (empty — no memories found)"))
 	}
 
 	leftPane := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(border).
-		Background(bg).
+		BorderForeground(fxBorderRail).
+		Background(fxBgCard).
 		Padding(0, 1).
 		Width(leftW).
 		Height(bodyH).
@@ -466,26 +492,29 @@ func (m Model) renderInspector(bg, border, accent, purple, muted, fg lipgloss.Co
 		if nodeType != "" {
 			metaLine += fmt.Sprintf("   Type: %s", nodeType)
 		}
-		detailMeta = lipgloss.NewStyle().Foreground(purple).Bold(true).Render("Context Inspector") + "\n" +
-			lipgloss.NewStyle().Foreground(muted).Render(metaLine+"\nTags: "+tags)
+		detailMeta = lipgloss.NewStyle().Foreground(fxFgBright).Bold(true).Render("Context Inspector") + "\n" +
+			lipgloss.NewStyle().Foreground(fxFgDim).Render(metaLine+"\nTags: ") +
+			lipgloss.NewStyle().Foreground(fxAmber).Render(tags)
 	} else {
-		detailMeta = lipgloss.NewStyle().Foreground(purple).Bold(true).Render("Context Inspector") + "\n" +
-			lipgloss.NewStyle().Foreground(muted).Render("Select a memory to inspect.")
+		detailMeta = lipgloss.NewStyle().Foreground(fxFgBright).Bold(true).Render("Context Inspector") + "\n" +
+			lipgloss.NewStyle().Foreground(fxFgDim).Render("Select a memory to inspect.")
 	}
 
+	sep := lipgloss.NewStyle().Foreground(fxBorderRail).Render(strings.Repeat("─", max(10, rightW-4)))
 	rightPane := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(border).
-		Background(bg).
+		BorderForeground(fxBorderRail).
+		Background(fxBgCard).
+		Foreground(fxFgBright).
 		Padding(0, 1).
 		Width(rightW).
 		Height(bodyH).
-		Render(detailMeta + "\n" + strings.Repeat("─", max(10, rightW-4)) + "\n" + m.viewport.View())
+		Render(detailMeta + "\n" + sep + "\n" + m.viewport.View())
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftPane, " ", rightPane)
 }
 
-func (m Model) renderContextMap(bg, border, muted, fg lipgloss.Color) string {
+func (m Model) renderContextMap() string {
 	catTokens := map[string]int{}
 	totalTokens := 0
 	for _, rec := range m.records {
@@ -526,7 +555,7 @@ func (m Model) renderContextMap(bg, border, muted, fg lipgloss.Color) string {
 			break
 		}
 	}
-	emptyCell := lipgloss.NewStyle().Foreground(border).Render("□")
+	emptyCell := lipgloss.NewStyle().Foreground(fxBorderRail).Render("□")
 	for len(cells) < gridCells {
 		cells = append(cells, emptyCell)
 	}
@@ -541,10 +570,10 @@ func (m Model) renderContextMap(bg, border, muted, fg lipgloss.Color) string {
 	freePct := max(0.0, 100.0-usedPct)
 
 	legend := []string{
-		lipgloss.NewStyle().Bold(true).Foreground(fg).Render(
+		lipgloss.NewStyle().Bold(true).Foreground(fxFgBright).Render(
 			fmt.Sprintf("ChromaDB Context · %s/%s tokens (%.1f%%)", formatTokens(totalTokens), formatTokens(contextBudgetTokens), usedPct),
 		),
-		lipgloss.NewStyle().Foreground(muted).Render("Token usage by category"),
+		lipgloss.NewStyle().Foreground(fxFgDim).Render("Token usage by category"),
 	}
 	for i, c := range sorted {
 		col := categoryColors[i%len(categoryColors)]
@@ -554,7 +583,7 @@ func (m Model) renderContextMap(bg, border, muted, fg lipgloss.Color) string {
 	}
 	legend = append(legend, fmt.Sprintf("%s Free space: %s (%.1f%%)", emptyCell, formatTokens(freeTokens), freePct))
 
-	bodyH := max(10, m.height-10)
+	bodyH := max(10, m.height-12)
 	content := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		strings.Join(gridLines, "\n"),
@@ -563,8 +592,9 @@ func (m Model) renderContextMap(bg, border, muted, fg lipgloss.Color) string {
 	)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(border).
-		Background(bg).
+		BorderForeground(fxBorderRail).
+		Background(fxBgCard).
+		Foreground(fxFgAuto).
 		Padding(1, 2).
 		Width(max(40, m.width-2)).
 		Height(bodyH).
