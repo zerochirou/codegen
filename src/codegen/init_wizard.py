@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import sys
 import termios
 import tty
@@ -94,8 +95,36 @@ def _find_bundled_skills() -> Path | None:
     return None
 
 
-def _install_skills(dest_dir: Path) -> int:
-    """Copy codegen skills into dest_dir; return count of installed skills."""
+CODEGEN_SKILLS = {
+    "architect",
+    "build",
+    "codegen",
+    "codegen-auto-pilot",
+    "codegen-help",
+    "codegen-memory",
+    "codegen-setup",
+    "forget",
+    "handoff",
+    "impact",
+    "recall",
+    "remember",
+    "review",
+    "ship",
+    "the-opposite",
+    "update-memory",
+}
+
+
+def _install_skills(dest_dir: Path, is_project: bool) -> int:
+    """Install codegen skills via skills.sh (`npx skills add`), with local fallback."""
+    if shutil.which("npx"):
+        cmd = ["npx", "--yes", "skills", "add", "zerochirou/codegen", "--yes"]
+        if not is_project:
+            cmd.append("--global")
+        result = subprocess.run(cmd, check=False)
+        if result.returncode == 0:
+            return len(CODEGEN_SKILLS)
+
     src = _find_bundled_skills()
     if src is None:
         return 0
@@ -103,7 +132,7 @@ def _install_skills(dest_dir: Path) -> int:
     dest_dir.mkdir(parents=True, exist_ok=True)
     count = 0
     for item in src.iterdir():
-        if item.is_dir() and (item / "SKILL.md").exists():
+        if item.is_dir() and item.name in CODEGEN_SKILLS and (item / "SKILL.md").exists():
             target = dest_dir / item.name
             if target.resolve() != item.resolve():
                 shutil.copytree(item, target, dirs_exist_ok=True)
@@ -170,5 +199,5 @@ def run_init_wizard() -> None:
         return
 
     _write_mcp_config(mcp_path, chroma_dir)
-    installed = _install_skills(skills_path) if install_skills else 0
+    installed = _install_skills(skills_path, is_project) if install_skills else 0
     print(f"{GREEN}└{RESET}  Done! MCP configured at {mcp_path} ({installed} skills ready).\n")
