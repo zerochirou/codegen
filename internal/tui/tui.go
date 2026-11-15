@@ -72,18 +72,20 @@ type Options struct {
 
 // Model is the Bubble Tea model for inspecting ChromaDB memories.
 type Model struct {
-	opts       Options
-	store      *chroma.Store
-	records    []recordView
-	cursor     int
-	activeTab  int // 0 = Inspector, 1 = Session Context
-	searching  bool
-	search     textinput.Model
-	viewport   viewport.Model
-	statusText string
-	errText    string
-	width      int
-	height     int
+	opts          Options
+	store         *chroma.Store
+	records       []recordView
+	cursor        int
+	activeTab     int // 0 = Inspector, 1 = Session Context, 2 = Note Graph
+	searching     bool
+	search        textinput.Model
+	viewport      viewport.Model
+	graph         graphState
+	graphViewport viewport.Model
+	statusText    string
+	errText       string
+	width         int
+	height        int
 }
 
 // NewModel constructs a MemoryTUI Model.
@@ -99,13 +101,16 @@ func NewModel(store *chroma.Store, opts Options) Model {
 	ti.Width = 50
 
 	vp := viewport.New(40, 12)
+	gvp := viewport.New(30, 10)
 	return Model{
-		opts:     opts,
-		store:    store,
-		search:   ti,
-		viewport: vp,
-		width:    100,
-		height:   30,
+		opts:          opts,
+		store:         store,
+		search:        ti,
+		viewport:      vp,
+		graph:         newGraphState(),
+		graphViewport: gvp,
+		width:         100,
+		height:        30,
 	}
 }
 
@@ -197,6 +202,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = max(0, len(m.records)-1)
 		}
 		m.syncDetailViewport()
+		m.rebuildGraph()
+		m.refreshGraphHitboxes()
 		return m, nil
 
 	case deletedMsg:
@@ -234,7 +241,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/":
 			return m, m.focusSearch()
 		case "tab":
-			m.activeTab = (m.activeTab + 1) % 2
+			m.activeTab = (m.activeTab + 1) % 3
 			return m, nil
 		case "1":
 			m.activeTab = 0
@@ -242,9 +249,68 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "2":
 			m.activeTab = 1
 			return m, nil
+		case "3":
+			m.activeTab = 2
+			return m, nil
 		case "r":
 			m.statusText = "Memories reloaded."
 			return m, m.loadMemoriesCmd(m.search.Value())
+		case "pgup", "ctrl+u":
+			if m.activeTab == 2 {
+				m.graphViewport.HalfPageUp()
+			} else {
+				m.viewport.HalfPageUp()
+			}
+			return m, nil
+		case "pgdown", "ctrl+d":
+			if m.activeTab == 2 {
+				m.graphViewport.HalfPageDown()
+			} else {
+				m.viewport.HalfPageDown()
+			}
+			return m, nil
+		case "c":
+			if m.activeTab == 2 && m.graph.SelectedIdx >= 0 && m.graph.SelectedIdx < len(m.graph.Nodes) {
+				n := m.graph.Nodes[m.graph.SelectedIdx]
+				text := n.Content
+				if n.Kind == nodeTag {
+					text = n.Title
+				}
+				if err := copyToClipboard(text); err == nil {
+					m.statusText = "Copied node content to clipboard."
+				} else {
+					m.statusText = "Clipboard unavailable: " + err.Error()
+				}
+				return m, nil
+			}
+			if rec, ok := m.selectedRecord(); ok {
+				if err := copyToClipboard(rec.Record.Content); err == nil {
+					m.statusText = "Copied memory content to clipboard."
+				} else {
+					m.statusText = "Clipboard unavailable: " + err.Error()
+				}
+			}
+			return m, nil
+		case "d":
+			if m.activeTab == 2 && m.graph.SelectedIdx >= 0 && m.graph.SelectedIdx < len(m.graph.Nodes) {
+				n := m.graph.Nodes[m.graph.SelectedIdx]
+				if n.Kind == nodeTag {
+					m.statusText = "Select a memory node to delete."
+					return m, nil
+				}
+				return m, m.deleteMemoryCmd(n.ID)
+			}
+			if rec, ok := m.selectedRecord(); ok {
+				return m, m.deleteMemoryCmd(rec.Record.ID)
+			}
+			return m, nil
+		}
+
+		if m.activeTab == 2 {
+			return m.handleGraphKey(msg.String())
+		}
+
+		switch msg.String() {
 		case "up", "k":
 			if m.activeTab == 0 {
 				m.moveCursor(-1)
@@ -257,26 +323,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.moveCursor(1)
 			} else {
 				m.viewport.ScrollDown(1)
-			}
-			return m, nil
-		case "pgup", "ctrl+u":
-			m.viewport.HalfPageUp()
-			return m, nil
-		case "pgdown", "ctrl+d":
-			m.viewport.HalfPageDown()
-			return m, nil
-		case "c":
-			if rec, ok := m.selectedRecord(); ok {
-				if err := copyToClipboard(rec.Record.Content); err == nil {
-					m.statusText = "Copied memory content to clipboard."
-				} else {
-					m.statusText = "Clipboard unavailable: " + err.Error()
-				}
-			}
-			return m, nil
-		case "d":
-			if rec, ok := m.selectedRecord(); ok {
-				return m, m.deleteMemoryCmd(rec.Record.ID)
 			}
 			return m, nil
 		}
@@ -303,6 +349,20 @@ func (m *Model) moveCursor(delta int) {
 	if next != m.cursor {
 		m.cursor = next
 		m.syncDetailViewport()
+		m.syncGraphSelectionToCursor()
+	}
+}
+
+func (m *Model) syncGraphSelectionToCursor() {
+	rec, ok := m.selectedRecord()
+	if !ok {
+		return
+	}
+	if idx, exists := m.graph.NodeByID[rec.Record.ID]; exists {
+		m.graph.SelectedIdx = idx
+		m.graph.SelectedID = rec.Record.ID
+		m.syncGraphViewport()
+		m.refreshGraphHitboxes()
 	}
 }
 
@@ -318,6 +378,9 @@ func (m Model) listVisibleWindow() (start, end int) {
 
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+		if m.activeTab == 2 {
+			return m.handleGraphMouse(msg)
+		}
 		if m.activeTab != 0 {
 			return m, nil
 		}
@@ -356,13 +419,19 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	// Tab strip sits on Y = 5.
 	if msg.Y == 5 {
-		_, tab0W, tab1W := m.renderTabs()
+		_, tab0W, tab1W, tab2W := m.renderTabs()
 		if msg.X >= 0 && msg.X < tab0W {
 			m.activeTab = 0
 		} else if msg.X >= tab0W && msg.X < tab0W+tab1W {
 			m.activeTab = 1
+		} else if msg.X >= tab0W+tab1W && msg.X < tab0W+tab1W+tab2W {
+			m.activeTab = 2
 		}
 		return m, nil
+	}
+
+	if m.activeTab == 2 {
+		return m.handleGraphMouse(msg)
 	}
 
 	// Body starts at Y = 6 (border at Y=6, column header at Y=7, rows start at Y=8).
@@ -372,6 +441,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if idx >= start && idx < end && idx != m.cursor {
 			m.cursor = idx
 			m.syncDetailViewport()
+			m.syncGraphSelectionToCursor()
 		}
 	}
 	return m, nil
@@ -385,6 +455,9 @@ func (m *Model) syncLayout() {
 	m.viewport.Width = rightW
 	m.viewport.Height = max(6, bodyH-5)
 	m.syncDetailViewport()
+	m.projectGraph()
+	m.syncGraphViewport()
+	m.refreshGraphHitboxes()
 }
 
 func (m Model) leftPaneWidth() int {
@@ -484,17 +557,18 @@ func (m Model) renderTopBarParts() topBarParts {
 	}
 }
 
-func (m Model) renderTabs() (string, int, int) {
-	tab0Style := lipgloss.NewStyle().Padding(0, 2).Foreground(fxFgDim)
-	tab1Style := lipgloss.NewStyle().Padding(0, 2).Foreground(fxFgDim)
-	if m.activeTab == 0 {
-		tab0Style = tab0Style.Foreground(fxFgBright).Bold(true).Underline(true)
-	} else {
-		tab1Style = tab1Style.Foreground(fxFgBright).Bold(true).Underline(true)
+func (m Model) renderTabs() (string, int, int, int) {
+	tabStyle := func(idx int) lipgloss.Style {
+		st := lipgloss.NewStyle().Padding(0, 2).Foreground(fxFgDim)
+		if m.activeTab == idx {
+			st = st.Foreground(fxFgBright).Bold(true).Underline(true)
+		}
+		return st
 	}
-	tab0 := tab0Style.Render("1 Inspector")
-	tab1 := tab1Style.Render("2 Session Context")
-	return lipgloss.JoinHorizontal(lipgloss.Top, tab0, tab1), lipgloss.Width(tab0), lipgloss.Width(tab1)
+	tab0 := tabStyle(0).Render("1 Inspector")
+	tab1 := tabStyle(1).Render("2 Session Context")
+	tab2 := tabStyle(2).Render("3 Note Graph")
+	return lipgloss.JoinHorizontal(lipgloss.Top, tab0, tab1, tab2), lipgloss.Width(tab0), lipgloss.Width(tab1), lipgloss.Width(tab2)
 }
 
 func (m Model) View() string {
@@ -526,13 +600,16 @@ func (m Model) View() string {
 	top := m.renderTopBarParts()
 	topBar := lipgloss.JoinHorizontal(lipgloss.Center, top.searchBox, " ", top.badgeBox, " ", top.reloadBtn)
 
-	tabs, _, _ := m.renderTabs()
+	tabs, _, _, _ := m.renderTabs()
 
 	var body string
-	if m.activeTab == 0 {
+	switch m.activeTab {
+	case 0:
 		body = m.renderInspector()
-	} else {
+	case 1:
 		body = m.renderContextMap()
+	default:
+		body = m.renderNoteGraph()
 	}
 
 	statusLine := ""
@@ -542,13 +619,17 @@ func (m Model) View() string {
 		statusLine = lipgloss.NewStyle().Foreground(fxAmber).Padding(0, 1).Render("▸ " + m.statusText)
 	}
 
+	footerText := "q quit · / search · click/↑↓ · Tab view · r reload · c copy · d del"
+	if m.activeTab == 2 {
+		footerText = "q quit · / search · arrows/click node · +- zoom · HJKL pan · t tags · o orphans · Enter inspect · Tab view"
+	}
 	footer := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false, false, false).
 		BorderForeground(fxBorderRail).
 		Foreground(fxFgDim).
 		Padding(0, 1).
 		Width(m.width).
-		Render("q quit · / search · click/↑↓ · Tab view · r reload · c copy · d del")
+		Render(truncate(footerText, max(20, m.width-2)))
 
 	parts := []string{header, topBar, tabs, body}
 	if statusLine != "" {

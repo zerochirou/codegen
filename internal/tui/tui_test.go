@@ -50,6 +50,14 @@ func TestTUIModelLoadAndRender(t *testing.T) {
 	if !strings.Contains(ctxView, "ChromaDB Context") || !strings.Contains(ctxView, "ui:") {
 		t.Fatalf("unexpected context map view:\n%s", ctxView)
 	}
+
+	// Switch to Note Graph tab
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(Model)
+	graphView := m.View()
+	if m.activeTab != 2 || !strings.Contains(graphView, "3 Note Graph") || !strings.Contains(graphView, "Bubble Tea Go TUI") {
+		t.Fatalf("unexpected note graph view:\n%s", graphView)
+	}
 }
 
 func TestTUIMouseInteractions(t *testing.T) {
@@ -85,7 +93,7 @@ func TestTUIMouseInteractions(t *testing.T) {
 	if !strings.Contains(lines[3], "↻ Reload") {
 		t.Fatalf("expected Reload button on line 3, got %q", lines[3])
 	}
-	if !strings.Contains(lines[5], "1 Inspector") || !strings.Contains(lines[5], "2 Session Context") {
+	if !strings.Contains(lines[5], "1 Inspector") || !strings.Contains(lines[5], "2 Session Context") || !strings.Contains(lines[5], "3 Note Graph") {
 		t.Fatalf("expected tab bar on line 5, got %q", lines[5])
 	}
 
