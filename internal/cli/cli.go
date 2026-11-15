@@ -22,7 +22,7 @@ import (
 )
 
 // Version is overridden at build time via -ldflags "-X github.com/zerochirou/codegen/internal/cli.Version=...".
-var Version = "0.2.0"
+var Version = "0.3.0"
 
 // Deps allows tests to stub side-effecting entrypoints cleanly.
 type Deps struct {
