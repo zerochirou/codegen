@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/zerochirou/codegen/internal/brand"
 	"github.com/zerochirou/codegen/internal/chroma"
 	"github.com/zerochirou/codegen/internal/initwizard"
 	"github.com/zerochirou/codegen/internal/mcp"
@@ -59,6 +60,7 @@ func NewRootCmd(deps Deps) *cobra.Command {
 	root := &cobra.Command{
 		Use:     "codegen",
 		Short:   "codegen CLI — ChromaDB vector memory, MCP server, and MemoryTUI",
+		Long:    brand.Banner(deps.Out) + "\n\ncodegen CLI — ChromaDB vector memory, MCP server, and MemoryTUI",
 		Version: Version,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()

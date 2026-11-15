@@ -31,6 +31,9 @@ func TestCLIDefaultShowsHelpNotTUI(t *testing.T) {
 	if !strings.Contains(out.String(), "Available Commands:") {
 		t.Fatalf("expected help output, got:\n%s", out.String())
 	}
+	if !strings.Contains(out.String(), "██████╗") {
+		t.Fatalf("expected CODEGEN banner in help output, got:\n%s", out.String())
+	}
 }
 
 func TestCLIVersion(t *testing.T) {

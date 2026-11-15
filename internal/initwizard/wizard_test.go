@@ -1,9 +1,11 @@
 package initwizard
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -103,5 +105,39 @@ func TestApplyProjectAndGlobal(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(project2, ".agents", "plugins", "codegen-memory", "mcp_config.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected no duplicate plugin when dynamic global MCP is active")
+	}
+}
+
+func TestRunPrintsBannerAndClackIntro(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	noSkills := false
+	_, err = Run(Options{
+		Scope:         "project",
+		ProjectName:   "demo",
+		StoragePath:   project,
+		InstallSkills: &noSkills,
+		Yes:           true,
+		In:            strings.NewReader(""),
+		Out:           &out,
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	rendered := out.String()
+	if !strings.Contains(rendered, "██████╗") || !strings.Contains(rendered, "codegen") {
+		t.Fatalf("expected CODEGEN banner and clack intro in output:\n%s", rendered)
 	}
 }

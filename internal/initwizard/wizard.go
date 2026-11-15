@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/zerochirou/codegen/internal/brand"
 	"github.com/zerochirou/codegen/internal/chroma"
 )
 
@@ -58,7 +59,8 @@ func Run(opts Options) (Result, error) {
 	}
 	reader := bufio.NewReader(in)
 
-	fmt.Fprintf(out, "\n%s┌%s  %sLet's configure codegen%s\n", ansiCyan, ansiReset, ansiBold, ansiReset)
+	fmt.Fprintf(out, "\n%s\n\n", brand.Banner(out))
+	fmt.Fprintf(out, "%s┌%s   %scodegen%s\n", ansiDim, ansiReset, ansiBold, ansiReset)
 	fmt.Fprintf(out, "%s│%s\n", ansiDim, ansiReset)
 
 	isProject := true
