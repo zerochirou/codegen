@@ -210,11 +210,12 @@ codegen tui --global  # Buka database global (~/.codegen/chroma_data)
 ```
 
 Kontrol di dalam TUI:
-- **Mouse**: Klik tab `1 Inspector` / `2 Session Context`, klik baris memory, klik kotak search, klik **`↻ Reload`**, dan scroll wheel pada daftar atau panel detail.
+- **Mouse**: Klik tab `1 Inspector` / `2 Session Context` / `3 Note Graph`, klik baris memory, klik node/neighbor atau tombol filter di **Note Graph**, klik kotak search, klik **`↻ Reload`**, dan scroll wheel (zoom pada canvas graph atau scroll pada panel detail).
 - **Keyboard**:
   - `/` — Fokus search semantik (`Enter` cari, `Esc` batal)
-  - `↑` / `↓` atau `j` / `k` — Pilih memory
-  - `Tab`, `1`, `2` — Pindah antara **Inspector** dan **Session Context** (peta distribusi token per kategori)
+  - `↑` / `↓` atau `j` / `k` — Pilih memory (atau navigasi node secara spasial di **Note Graph**)
+  - `Tab`, `1`, `2`, `3` — Pindah antara **Inspector**, **Session Context**, dan **Note Graph** (graf relasi ala Obsidian dari `links`, `[[wiki-links]]`, dan `#tags`)
+  - Di tab **Note Graph**: `n` / `p` (ganti node), `+` / `-` / `0` (zoom & reset), `H` / `J` / `K` / `L` & `f` (pan & center), `t` (toggle `#Tags`), `o` (toggle Orphans), `Enter` (buka node di **Inspector**)
   - `r` — Reload data dari ChromaDB
   - `c` — Copy isi memory ke clipboard
   - `d` — Hapus memory terpilih
@@ -238,6 +239,10 @@ codegen tui --global        # Buka MemoryTUI global (`-g`)
 codegen tui -c <nama>       # Pilih nama collection ChromaDB (default: 'default')
 
 codegen run                 # Jalankan MCP server (stdio JSON-RPC 2.0)
+codegen skills list         # Cek status skills & rules (new/outdated/up-to-date/custom)
+codegen skills update       # Update/sync skills & rules di project saat ini
+codegen skills update -g    # Update/sync skills & rules secara global
+# Flag tambahan `skills update`: [skill...], --path <dir>, --dry-run, --no-rules, --remote, --ref <ref>
 codegen update              # Update binary codegen dari GitHub via `go install`
 codegen uninstall           # Hapus binary global codegen (alias: `remove`)
 ```
@@ -266,6 +271,7 @@ Server MCP mengekspos 3 tool standar untuk agen AI:
 │   ├── cli/            # Cobra CLI commands & flags
 │   ├── initwizard/     # Interactive Clack-style setup wizard
 │   ├── mcp/            # Stdio MCP server + deteksi workspace via roots/list
+│   ├── skills/         # Per-project & global skills/rules sync engine (+ --remote)
 │   └── tui/            # Bubble Tea + Lipgloss MemoryTUI (mouse + keyboard)
 ├── .agents/
 │   ├── rules/          # Rule `always_on` (`antislop.md`) untuk setiap sesi

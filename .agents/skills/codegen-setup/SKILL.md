@@ -12,5 +12,5 @@ Use this skill to initialize or verify the `codegen` environment on a machine or
 2. **Verify Workspace / Global Initialization**: Run `codegen init` in the project (or check `.codegen/config.json`, `.gemini/mcp_config.json`, and `~/.gemini/config/mcp_config.json`).
 3. **Verify MCP Server (`codegen-memory`)**: Confirm `codegen-memory` (`codegen run`) is registered and `save_memory`, `search_memory`, and `delete_memory` are callable.
 4. **Verify ChromaDB Storage**: Confirm the per-project `<project>/chroma_data` (or global `~/.codegen/chroma_data`) directory exists and is inspectable via `codegen tui` / `codegen tui --global`.
-5. **Verify Skills**: Confirm `.agents/skills/` contains the core workflow skills (`/codegen`, `/recall`, `/architect`, `/impact`, `/build`, `/review`, `/ship`, `/handoff`).
+5. **Verify Skills**: Confirm `.agents/skills/` contains the core workflow skills (`/codegen`, `/recall`, `/architect`, `/impact`, `/build`, `/review`, `/ship`, `/handoff`). Run `codegen skills list` to check for missing or outdated skills, and `codegen skills update` (or `codegen skills update --global`) to sync them.
 6. **Report Status**: Output a concise pass/fail checklist and exact next steps if anything is missing.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -25,12 +26,13 @@ var Version = "0.2.0"
 
 // Deps allows tests to stub side-effecting entrypoints cleanly.
 type Deps struct {
-	SkillsFS fs.FS
-	RunTUI   func(opts tui.Options) error
-	RunMCP   func(ctx context.Context) error
-	RunInit  func(opts initwizard.Options) (initwizard.Result, error)
-	Out      io.Writer
-	Err      io.Writer
+	SkillsFS         fs.FS
+	RemoteHTTPClient *http.Client
+	RunTUI           func(opts tui.Options) error
+	RunMCP           func(ctx context.Context) error
+	RunInit          func(opts initwizard.Options) (initwizard.Result, error)
+	Out              io.Writer
+	Err              io.Writer
 }
 
 func defaultDeps(skillsFS fs.FS) Deps {
@@ -155,6 +157,8 @@ func NewRootCmd(deps Deps) *cobra.Command {
 	initCmd.Flags().BoolVar(&initNoSkills, "no-skills", false, "Skip installing agent skills")
 	root.AddCommand(initCmd)
 
+	root.AddCommand(newSkillsCmd(deps))
+
 	// update subcommand
 	root.AddCommand(&cobra.Command{
 		Use:   "update",
@@ -167,7 +171,11 @@ func NewRootCmd(deps Deps) *cobra.Command {
 			c := exec.CommandContext(cmd.Context(), goBin, "install", "github.com/zerochirou/codegen/cmd/codegen@latest")
 			c.Stdout = cmd.OutOrStdout()
 			c.Stderr = cmd.ErrOrStderr()
-			return c.Run()
+			if err := c.Run(); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Updated codegen CLI. Run 'codegen skills update' in your project (or 'codegen skills update --global') to sync the latest skills.")
+			return nil
 		},
 	})
 

@@ -3,7 +3,6 @@ package initwizard
 import (
 	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/zerochirou/codegen/internal/brand"
 	"github.com/zerochirou/codegen/internal/chroma"
+	"github.com/zerochirou/codegen/internal/skills"
 )
 
 const (
@@ -246,19 +246,22 @@ func Apply(cfg ApplyConfig) (Result, error) {
 		}
 
 		if cfg.InstallSkills {
-			skillsDir := filepath.Join(cfg.ProjectDir, ".agents", "skills")
-			count, err := installBundledSkills(cfg.SkillsFS, skillsDir)
+			syncRes, err := skills.Sync(skills.SyncOptions{
+				Target: skills.Target{
+					Scope:     "project",
+					RootDir:   cfg.ProjectDir,
+					SkillsDir: filepath.Join(cfg.ProjectDir, ".agents", "skills"),
+					RulesDir:  filepath.Join(cfg.ProjectDir, ".agents", "rules"),
+				},
+				SkillsFS:     cfg.SkillsFS,
+				IncludeRules: true,
+			})
 			if err != nil {
 				return Result{}, err
 			}
-			res.SkillsDir = skillsDir
-			res.SkillsInstalled = count
-
-			rulePaths, err := installProjectRules(cfg.SkillsFS, filepath.Join(cfg.ProjectDir, ".agents", "rules"))
-			if err != nil {
-				return Result{}, err
-			}
-			res.ConfigPaths = append(res.ConfigPaths, rulePaths...)
+			res.SkillsDir = syncRes.SkillsDir
+			res.SkillsInstalled = syncRes.TotalBundled
+			res.ConfigPaths = append(res.ConfigPaths, syncRes.RulePaths...)
 		}
 		return res, nil
 	}
@@ -302,21 +305,22 @@ func Apply(cfg ApplyConfig) (Result, error) {
 	}
 
 	if cfg.InstallSkills {
-		skillsDir := filepath.Join(cfg.HomeDir, ".gemini", "config", "skills")
-		count, err := installBundledSkills(cfg.SkillsFS, skillsDir)
+		syncRes, err := skills.Sync(skills.SyncOptions{
+			Target: skills.Target{
+				Scope:     "global",
+				RootDir:   cfg.HomeDir,
+				SkillsDir: filepath.Join(cfg.HomeDir, ".gemini", "config", "skills"),
+				RulesDir:  filepath.Join(cfg.HomeDir, ".gemini", "config", "plugins", "codegen-rules"),
+			},
+			SkillsFS:     cfg.SkillsFS,
+			IncludeRules: true,
+		})
 		if err != nil {
 			return Result{}, err
 		}
-		res.SkillsDir = skillsDir
-		res.SkillsInstalled = count
-
-		globalRulePath, err := installGlobalRulesPlugin(cfg.SkillsFS, filepath.Join(cfg.HomeDir, ".gemini", "config", "plugins", "codegen-rules"))
-		if err != nil {
-			return Result{}, err
-		}
-		if globalRulePath != "" {
-			res.ConfigPaths = append(res.ConfigPaths, globalRulePath)
-		}
+		res.SkillsDir = syncRes.SkillsDir
+		res.SkillsInstalled = syncRes.TotalBundled
+		res.ConfigPaths = append(res.ConfigPaths, syncRes.RulePaths...)
 	}
 	return res, nil
 }
@@ -410,158 +414,6 @@ func writeJSONFile(path string, value any) error {
 		return err
 	}
 	return os.WriteFile(path, append(data, '\n'), 0o644)
-}
-
-func copyEmbedTree(fsys fs.FS, srcDir, dstDir string) error {
-	return fs.WalkDir(fsys, srcDir, func(p string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel := strings.TrimPrefix(p, srcDir)
-		rel = strings.TrimPrefix(rel, "/")
-		dst := dstDir
-		if rel != "" {
-			dst = filepath.Join(dstDir, filepath.FromSlash(rel))
-		}
-		if d.IsDir() {
-			return os.MkdirAll(dst, 0o755)
-		}
-		data, err := fs.ReadFile(fsys, p)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(dst, data, 0o644)
-	})
-}
-
-func installBundledSkills(skillsFS fs.FS, destDir string) (int, error) {
-	if skillsFS == nil {
-		return 0, nil
-	}
-	const root = ".agents/skills"
-	entries, err := fs.ReadDir(skillsFS, root)
-	if err != nil {
-		return 0, fmt.Errorf("read bundled skills: %w", err)
-	}
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return 0, err
-	}
-
-	count := 0
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		skillRoot := root + "/" + entry.Name()
-		if _, err := fs.Stat(skillsFS, skillRoot+"/SKILL.md"); err != nil {
-			continue
-		}
-		if err := copyEmbedTree(skillsFS, skillRoot, filepath.Join(destDir, entry.Name())); err != nil {
-			return count, err
-		}
-		count++
-	}
-	return count, nil
-}
-
-type bundledRule struct {
-	name string
-	data []byte
-}
-
-func readBundledRules(skillsFS fs.FS) ([]bundledRule, error) {
-	if skillsFS == nil {
-		return nil, nil
-	}
-	const root = ".agents/rules"
-	entries, err := fs.ReadDir(skillsFS, root)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read bundled rules: %w", err)
-	}
-	var rules []bundledRule
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-		data, err := fs.ReadFile(skillsFS, root+"/"+entry.Name())
-		if err != nil {
-			return nil, err
-		}
-		rules = append(rules, bundledRule{name: entry.Name(), data: data})
-	}
-	return rules, nil
-}
-
-func installProjectRules(skillsFS fs.FS, destDir string) ([]string, error) {
-	rules, err := readBundledRules(skillsFS)
-	if err != nil || len(rules) == 0 {
-		return nil, err
-	}
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return nil, err
-	}
-	installed := make([]string, 0, len(rules))
-	for _, r := range rules {
-		dst := filepath.Join(destDir, r.name)
-		if err := os.WriteFile(dst, r.data, 0o644); err != nil {
-			return installed, err
-		}
-		installed = append(installed, dst)
-	}
-	return installed, nil
-}
-
-func installGlobalRulesPlugin(skillsFS fs.FS, pluginDir string) (string, error) {
-	rules, err := readBundledRules(skillsFS)
-	if err != nil || len(rules) == 0 {
-		return "", err
-	}
-	sections := make([]string, 0, len(rules))
-	for _, r := range rules {
-		if body := strings.TrimSpace(stripYAMLFrontmatter(string(r.data))); body != "" {
-			sections = append(sections, body)
-		}
-	}
-	if len(sections) == 0 {
-		return "", nil
-	}
-
-	if err := writeJSONFile(filepath.Join(pluginDir, "plugin.json"), map[string]any{
-		"name":        "codegen-rules",
-		"description": "Always-on session rules bundled with codegen (antislop).",
-	}); err != nil {
-		return "", err
-	}
-	rulesDir := filepath.Join(pluginDir, "rules")
-	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
-		return "", err
-	}
-	agentsMD := filepath.Join(rulesDir, "AGENTS.md")
-	if err := os.WriteFile(agentsMD, []byte(strings.Join(sections, "\n\n")+"\n"), 0o644); err != nil {
-		return "", err
-	}
-	return agentsMD, nil
-}
-
-func stripYAMLFrontmatter(md string) string {
-	trimmed := strings.TrimPrefix(md, "\ufeff")
-	if !strings.HasPrefix(trimmed, "---\n") && !strings.HasPrefix(trimmed, "---\r\n") {
-		return md
-	}
-	rest := strings.TrimPrefix(trimmed, "---\r\n")
-	if rest == trimmed {
-		rest = strings.TrimPrefix(trimmed, "---\n")
-	}
-	if idx := strings.Index(rest, "\n---\n"); idx >= 0 {
-		return rest[idx+5:]
-	}
-	if idx := strings.Index(rest, "\r\n---\r\n"); idx >= 0 {
-		return rest[idx+7:]
-	}
-	return md
 }
 
 func promptText(reader *bufio.Reader, out io.Writer, label, defaultVal string) string {
