@@ -9,7 +9,7 @@
 
 **AI Agent Memory, Engineering Skills, & MemoryTUI — 100% Go, lokal, tanpa server eksternal.**
 
-`codegen` memberi AI coding agent **ingatan jangka panjang berbasis ChromaDB lokal** (embedded `chroma-go` + ONNX `all-MiniLM-L6-v2`) dan **17 workflow skills** agar agent tidak lupa aturan repo, keputusan arsitektur, atau progres tugas antar sesi.
+`codegen` memberi AI coding agent **ingatan jangka panjang berbasis ChromaDB lokal** (embedded `chroma-go` + ONNX `all-MiniLM-L6-v2`), **24 workflow skills**, dan **filter `antislop` otomatis di setiap sesi** agar agent tidak lupa aturan repo, keputusan arsitektur, atau standar kualitas kode/UI.
 
 ---
 
@@ -21,8 +21,8 @@ Tanpa memory & workflow, setiap kali sesi chat baru dimulai:
 - Tidak ada tempat visual untuk melihat apa saja yang "diingat" agent.
 
 Dengan `codegen`:
-1. **`codegen init`** — pasang ChromaDB lokal, daftarkan MCP `codegen-memory`, dan salin 17 agent skills sekaligus.
-2. **Prompting pakai skills** — pakai `/codegen`, `/remember`, `/recall`, `/architect`, dst. Agent otomatis menyimpan & mencari konteks.
+1. **`codegen init`** — pasang ChromaDB lokal, daftarkan MCP `codegen-memory`, salin 24 agent skills, dan pasang rule `antislop` otomatis untuk tiap sesi.
+2. **Prompting pakai skills** — pakai `/codegen`, `/remember`, `/recall`, `/create-pr`, dst. Agent otomatis menyimpan & mencari konteks.
 3. **`codegen tui`** — buka TUI di terminal (dukung mouse & keyboard) untuk cek isi memory, cari secara semantik, atau pantau pemakaian token.
 
 ---
@@ -31,13 +31,19 @@ Dengan `codegen`:
 
 ### 1. Install CLI
 
-Pastikan **Go (>= 1.24)** sudah terpasang, lalu jalankan:
+Jalankan installer berikut (mendukung **macOS, Linux, FreeBSD, WSL, dan Windows Git Bash** — jika Go belum terpasang, installer akan menawarkan opsi untuk install Go otomatis):
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/zerochirou/codegen/master/scripts/install.sh | sh
+curl -LsSf https://zerochirou.com/codegen | sh
 ```
 
-Atau langsung lewat `go install`:
+Untuk **Windows PowerShell**:
+
+```powershell
+irm https://raw.githubusercontent.com/zerochirou/codegen/master/scripts/install.ps1 | iex
+```
+
+Atau jika Go (>= 1.24) sudah ada, langsung lewat `go install`:
 
 ```bash
 go install github.com/zerochirou/codegen/cmd/codegen@latest
@@ -75,7 +81,7 @@ codegen tui
 
 ## Jenis-Jenis Penggunaan Skills
 
-Saat `codegen init` selesai (atau saat skill di-install), ada **17 skills** yang bisa kamu panggil dengan `/<nama-skill>`. Berikut pembagiannya dari yang paling sering dipakai sampai yang spesifik:
+Saat `codegen init` selesai (atau saat skill di-install), ada **24 skills** yang bisa kamu panggil dengan `/<nama-skill>` (plus filter `antislop` yang langsung aktif otomatis). Berikut pembagiannya dari yang paling sering dipakai sampai yang spesifik:
 
 ### 1. Mode Otomatis Penuh (Dari Nol Sampai Selesai)
 
@@ -106,6 +112,7 @@ Cocok kalau kamu hanya butuh **satu tahap tertentu**—misalnya cuma mau meranca
 | `/build` | Rencana sudah jelas dan siap ngoding | Tulis kode modular, tanpa duplikasi, sesuai konvensi repo |
 | `/review` | Setelah selesai edit / sebelum commit | Audit diff ala Staff Engineer + wajib jalankan test/linter/build nyata |
 | `/ship` | Pekerjaan sudah terverifikasi dan siap ditutup | Simpan keputusan penting ke `codegen-memory` dan beri ringkasan hasil yang jujur & singkat |
+| `/create-pr` | Branch siap diajukan sebagai Pull Request di GitHub | Cek branch/diff/PR template, push ke remote, dan buka PR via `gh pr create` |
 
 Contoh pemakaian satuan:
 ```text
@@ -113,6 +120,7 @@ Contoh pemakaian satuan:
 /architect Rancang skema webhook retry dengan exponential backoff
 /impact Cek modul apa saja yang terdampak kalau signature Store.Save diubah
 /review Audit semua perubahan uncommitted dan jalankan go test
+/create-pr Buatkan PR ke main dari branch fitur ini
 ```
 
 ---
@@ -151,7 +159,22 @@ Contoh:
 
 ---
 
-### 5. Bantuan, Setup, & Red-Team Stress Test
+### 5. Filter Anti-Slop Otomatis (`antislop` — Aktif Setiap Sesi)
+
+Diadaptasi dari [`miqdadbadjuber/anti-slop`](https://github.com/miqdadbadjuber/anti-slop) (MIT) agar langsung berjalan otomatis dalam mode `during` di setiap sesi (tanpa memutus alur untuk menanyakan pilihan mode lagi). Rule `always_on` (`antislop.md` / `codegen-rules/rules/AGENTS.md`) mengarahkan agent ke skill berikut sesuai konteks tugas:
+
+| Skill | Fokus Filter |
+| --- | --- |
+| `/antislop` | Core filter: Purpose Test, standar Craftsmanship `C-1..C-5`, dan Delivery Gate |
+| `/antislop-ui` | Desain UI/visual, hierarki warna, komponen, dan animasi yang punya tujuan |
+| `/antislop-copywriting` | Copywriting, headline, CTA, serta pemangkasan buzzword dan klaim kosong |
+| `/antislop-human` | Aksesibilitas WCAG (termasuk script `contrast-check.py`), fokus keyboard, empty/loading/error state |
+| `/antislop-layoutmobile` | Responsive breakpoint, grid reflow, no horizontal overflow, dan tap target |
+| `/antislop-code` | Kebersihan komentar kode (hapus banner dekoratif/narasi baris, sisakan alasan penting "why") |
+
+---
+
+### 6. Bantuan, Setup, & Red-Team Stress Test
 
 | Skill | Kapan Dipakai | Fungsi |
 | --- | --- | --- |
@@ -168,8 +191,8 @@ Kamu bisa memilih isolasi memory per project atau global saat menjalankan `codeg
 
 | Mode | Lokasi Database ChromaDB | File Config yang Ditulis | Cara Buka TUI |
 | --- | --- | --- | --- |
-| **Per-project** (default) | `<project>/chroma_data` | `.codegen/config.json`, `.gemini/mcp_config.json`, `.agents/skills/`, *(dan `.agents/plugins/codegen-memory/` jika MCP global dinamis belum aktif)* | `codegen tui` |
-| **Global** | `~/.codegen/chroma_data` | `~/.codegen/config.json`, `~/.gemini/config/mcp_config.json`, `~/.gemini/config/skills/` | `codegen tui --global` |
+| **Per-project** (default) | `<project>/chroma_data` | `.codegen/config.json`, `.gemini/mcp_config.json`, `.agents/skills/`, `.agents/rules/antislop.md` (`always_on`), *(dan `.agents/plugins/codegen-memory/` jika MCP global dinamis belum aktif)* | `codegen tui` |
+| **Global** | `~/.codegen/chroma_data` | `~/.codegen/config.json`, `~/.gemini/config/mcp_config.json`, `~/.gemini/config/skills/`, `~/.gemini/config/plugins/codegen-rules/` (`rules/AGENTS.md`) | `codegen tui --global` |
 
 **Bagaimana `codegen run` (MCP server) memilih database?**
 - Saat dijalankan di dalam project yang sudah `codegen init`, MCP otomatis memakai `<project>/chroma_data` milik project tersebut.
@@ -235,7 +258,7 @@ Server MCP mengekspos 3 tool standar untuk agen AI:
 
 ```text
 .
-├── assets.go           # Embed .agents/skills ke dalam binary CLI (go:embed)
+├── assets.go           # Embed .agents/skills & .agents/rules ke dalam binary CLI (go:embed)
 ├── cmd/codegen/        # Entrypoint utama binary `codegen`
 ├── internal/
 │   ├── brand/          # Logo ANSI Shadow `CODEGEN` & terminal color detection
@@ -244,7 +267,9 @@ Server MCP mengekspos 3 tool standar untuk agen AI:
 │   ├── initwizard/     # Interactive Clack-style setup wizard
 │   ├── mcp/            # Stdio MCP server + deteksi workspace via roots/list
 │   └── tui/            # Bubble Tea + Lipgloss MemoryTUI (mouse + keyboard)
-├── .agents/skills/     # 17 bundled agent skills
+├── .agents/
+│   ├── rules/          # Rule `always_on` (`antislop.md`) untuk setiap sesi
+│   └── skills/         # 24 bundled agent skills (workflow, memory, create-pr, antislop*)
 └── scripts/            # Installer & local setup scripts (`install.sh`, `setup.sh`)
 ```
 
@@ -253,3 +278,10 @@ Menjalankan seluruh unit test:
 ```bash
 go test ./...
 ```
+
+---
+
+## Lisensi
+
+Proyek ini menggunakan lisensi [MIT](./LICENSE).
+

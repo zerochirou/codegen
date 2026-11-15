@@ -141,3 +141,62 @@ func TestRunPrintsBannerAndClackIntro(t *testing.T) {
 		t.Fatalf("expected CODEGEN banner and clack intro in output:\n%s", rendered)
 	}
 }
+
+func TestApplyBundledRulesProjectAndGlobal(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+
+	assets := fstest.MapFS{
+		".agents/skills/create-pr/SKILL.md": &fstest.MapFile{Data: []byte("# create-pr\n")},
+		".agents/skills/antislop/SKILL.md":  &fstest.MapFile{Data: []byte("# antislop\n")},
+		".agents/rules/antislop.md":         &fstest.MapFile{Data: []byte("---\ntrigger: always_on\n---\n# antislop auto-active\n")},
+	}
+
+	if _, err := Apply(ApplyConfig{
+		IsProject:     true,
+		ProjectDir:    project,
+		HomeDir:       home,
+		ProjectName:   "demo",
+		ChromaDir:     project,
+		InstallSkills: true,
+		SkillsFS:      assets,
+	}); err != nil {
+		t.Fatalf("Apply project failed: %v", err)
+	}
+
+	projRule, err := os.ReadFile(filepath.Join(project, ".agents", "rules", "antislop.md"))
+	if err != nil {
+		t.Fatalf("expected project always-on rule: %v", err)
+	}
+	if !strings.Contains(string(projRule), "trigger: always_on") {
+		t.Fatalf("expected trigger: always_on in project rule, got:\n%s", string(projRule))
+	}
+
+	if _, err := Apply(ApplyConfig{
+		IsProject:     false,
+		ProjectDir:    project,
+		HomeDir:       home,
+		ProjectName:   "global",
+		ChromaDir:     filepath.Join(home, ".codegen"),
+		InstallSkills: true,
+		SkillsFS:      assets,
+	}); err != nil {
+		t.Fatalf("Apply global failed: %v", err)
+	}
+
+	pluginDir := filepath.Join(home, ".gemini", "config", "plugins", "codegen-rules")
+	if _, err := os.Stat(filepath.Join(pluginDir, "plugin.json")); err != nil {
+		t.Fatalf("expected global codegen-rules plugin.json: %v", err)
+	}
+	globalRule, err := os.ReadFile(filepath.Join(pluginDir, "rules", "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("expected global plugin rules/AGENTS.md: %v", err)
+	}
+	if strings.Contains(string(globalRule), "trigger: always_on") {
+		t.Fatalf("global plugin rules/AGENTS.md must strip YAML frontmatter, got:\n%s", string(globalRule))
+	}
+	if !strings.Contains(string(globalRule), "antislop auto-active") {
+		t.Fatalf("expected stripped antislop rule body in global AGENTS.md, got:\n%s", string(globalRule))
+	}
+}
