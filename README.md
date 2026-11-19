@@ -210,12 +210,12 @@ codegen tui --global  # Buka database global (~/.codegen/chroma_data)
 ```
 
 Kontrol di dalam TUI:
-- **Mouse**: Klik tab `1 Inspector` / `2 Session Context` / `3 Note Graph`, klik baris memory, klik node/neighbor atau tombol filter di **Note Graph**, klik kotak search, klik **`↻ Reload`**, dan scroll wheel (zoom pada canvas graph atau scroll pada panel detail).
+- **Mouse**: Klik tab `1 Inspector` / `2 Session Context` / `3 Note Graph`, klik baris memory, klik/drag-and-drop node atau label untuk memindahkan posisinya, drag area kosong canvas untuk menggeser (pan) graph, klik neighbor atau tombol toolbar di **Note Graph**, klik kotak search, klik **`↻ Reload`**, dan scroll wheel (zoom pada canvas graph atau scroll pada panel detail).
 - **Keyboard**:
   - `/` — Fokus search semantik (`Enter` cari, `Esc` batal)
   - `↑` / `↓` atau `j` / `k` — Pilih memory (atau navigasi node secara spasial di **Note Graph**)
   - `Tab`, `1`, `2`, `3` — Pindah antara **Inspector**, **Session Context**, dan **Note Graph** (graf relasi ala Obsidian dari `links`, `[[wiki-links]]`, dan `#tags`)
-  - Di tab **Note Graph**: `n` / `p` (ganti node), `+` / `-` / `0` (zoom & reset), `H` / `J` / `K` / `L` & `f` (pan & center), `t` (toggle `#Tags`), `o` (toggle Orphans), `Enter` (buka node di **Inspector**)
+  - Di tab **Note Graph**: `n` / `p` (ganti node), `+` / `-` / `0` (zoom & reset `1.0x`), `F` (fit seluruh graph), `R` (reset posisi layout hasil drag), `H` / `J` / `K` / `L` & `f` (pan & center), `t` (toggle `#Tags`), `o` (toggle Orphans), `Enter` (buka node di **Inspector**)
   - `r` — Reload data dari ChromaDB
   - `c` — Copy isi memory ke clipboard
   - `d` — Hapus memory terpilih

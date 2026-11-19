@@ -241,18 +241,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/":
 			return m, m.focusSearch()
 		case "tab":
+			m.graph.clearDrag()
 			m.activeTab = (m.activeTab + 1) % 3
 			return m, nil
 		case "1":
+			m.graph.clearDrag()
 			m.activeTab = 0
 			return m, nil
 		case "2":
+			m.graph.clearDrag()
 			m.activeTab = 1
 			return m, nil
 		case "3":
+			m.graph.clearDrag()
 			m.activeTab = 2
 			return m, nil
 		case "r":
+			m.graph.clearDrag()
 			m.statusText = "Memories reloaded."
 			return m, m.loadMemoriesCmd(m.search.Value())
 		case "pgup", "ctrl+u":
@@ -397,12 +402,19 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if m.activeTab == 2 && m.graph.DragMode != dragNone {
+		if msg.Action == tea.MouseActionMotion || msg.Action == tea.MouseActionRelease {
+			return m.handleGraphMouse(msg)
+		}
+	}
+
 	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 		return m, nil
 	}
 
 	// Top bar spans Y = 2..4 (search box, count badge, reload button).
 	if msg.Y >= 2 && msg.Y <= 4 {
+		m.graph.clearDrag()
 		top := m.renderTopBarParts()
 		if msg.X >= 0 && msg.X < top.searchEndX {
 			return m, m.focusSearch()
@@ -419,6 +431,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	// Tab strip sits on Y = 5.
 	if msg.Y == 5 {
+		m.graph.clearDrag()
 		_, tab0W, tab1W, tab2W := m.renderTabs()
 		if msg.X >= 0 && msg.X < tab0W {
 			m.activeTab = 0
@@ -621,7 +634,7 @@ func (m Model) View() string {
 
 	footerText := "q quit · / search · click/↑↓ · Tab view · r reload · c copy · d del"
 	if m.activeTab == 2 {
-		footerText = "q quit · / search · arrows/click node · +- zoom · HJKL pan · t tags · o orphans · Enter inspect · Tab view"
+		footerText = "q quit · drag node/canvas · +- zoom · 0 1x · F fit · R relayout · t tags · o orphans · Enter inspect"
 	}
 	footer := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false, false, false).

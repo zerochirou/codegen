@@ -75,22 +75,38 @@ type graphToolbarButton struct {
 	EndX   int
 }
 
+type graphDragMode int
+
+const (
+	dragNone graphDragMode = iota
+	dragNode
+	dragPan
+)
+
 type graphState struct {
-	ShowTags     bool
-	ShowOrphans  bool
-	Zoom         float64
-	PanX         float64
-	PanY         float64
-	SelectedID   string
-	SelectedIdx  int
-	Nodes        []graphNode
-	Edges        []graphEdge
-	NodeByID     map[string]int
-	ToolbarHits  []graphToolbarButton
-	NeighborHits []graphNeighborHit
-	LabelHits    []graphLabelHit
-	CanvasW      int
-	CanvasH      int
+	ShowTags         bool
+	ShowOrphans      bool
+	Zoom             float64
+	PanX             float64
+	PanY             float64
+	SelectedID       string
+	SelectedIdx      int
+	Nodes            []graphNode
+	Edges            []graphEdge
+	NodeByID         map[string]int
+	PinnedPositions  map[string][2]float64
+	ToolbarHits      []graphToolbarButton
+	NeighborHits     []graphNeighborHit
+	LabelHits        []graphLabelHit
+	CanvasW          int
+	CanvasH          int
+	DragMode         graphDragMode
+	DragNodeIdx      int
+	DragMoved        bool
+	DragStartScreenX int
+	DragStartScreenY int
+	DragStartX       float64
+	DragStartY       float64
 }
 
 type graphLabelHit struct {
@@ -102,12 +118,20 @@ type graphLabelHit struct {
 
 func newGraphState() graphState {
 	return graphState{
-		ShowTags:    true,
-		ShowOrphans: true,
-		Zoom:        1.0,
-		SelectedIdx: -1,
-		NodeByID:    map[string]int{},
+		ShowTags:        true,
+		ShowOrphans:     true,
+		Zoom:            1.0,
+		SelectedIdx:     -1,
+		DragNodeIdx:     -1,
+		NodeByID:        map[string]int{},
+		PinnedPositions: map[string][2]float64{},
 	}
+}
+
+func (g *graphState) clearDrag() {
+	g.DragMode = dragNone
+	g.DragNodeIdx = -1
+	g.DragMoved = false
 }
 
 var nodeTypeColorMap = map[string]lipgloss.Color{
@@ -146,6 +170,7 @@ func (m *Model) rebuildGraph() {
 	}
 
 	g := &m.graph
+	g.clearDrag()
 	if g.Zoom <= 0 {
 		g.Zoom = 1.0
 	}
@@ -336,6 +361,12 @@ func (m *Model) rebuildGraph() {
 	}
 
 	layoutGraph(g.Nodes, g.Edges)
+	for i := range g.Nodes {
+		if pos, ok := g.PinnedPositions[g.Nodes[i].ID]; ok {
+			g.Nodes[i].X = pos[0]
+			g.Nodes[i].Y = pos[1]
+		}
+	}
 
 	g.SelectedIdx = -1
 	if prevID != "" {
@@ -431,23 +462,19 @@ func layoutGraph(nodes []graphNode, edges []graphEdge) {
 
 	// Place nodes on an aspect-balanced golden-angle spiral for deterministic convergence.
 	const goldenAngle = 2.399963229728653
-	const aspectX = 1.65
+	const aspectX = 2.2
+	const k = 1.65
 	posX := make([]float64, n)
 	posY := make([]float64, n)
 	for rank, idx := range order {
-		r := 0.25 * math.Sqrt(float64(rank+1))
+		r := 0.85 * math.Sqrt(float64(rank+1))
 		theta := float64(rank) * goldenAngle
 		posX[idx] = r * math.Cos(theta) * aspectX
 		posY[idx] = r * math.Sin(theta)
 	}
 
-	area := float64(n) * 0.9
-	k := math.Sqrt(area / float64(n))
-	if k < 0.35 {
-		k = 0.35
-	}
-
-	const iterations = 130
+	const iterations = 220
+	startTemp := math.Max(1.2, 0.45*k*math.Sqrt(float64(n)))
 	dispX := make([]float64, n)
 	dispY := make([]float64, n)
 	for iter := 0; iter < iterations; iter++ {
@@ -465,7 +492,11 @@ func layoutGraph(nodes []graphNode, edges []graphEdge) {
 					dist = 0.01
 					dx = 0.01
 				}
-				rep := (k * k) / dist
+				hubBoost := math.Min(2.8, 1.0+0.12*float64(deg[i]+deg[j]))
+				rep := ((k * k) / dist) * hubBoost
+				if dist < k*0.95 {
+					rep += (k * k * k) / (dist * dist) * 0.30
+				}
 				ux := (dx / dist) * rep * aspectX
 				uy := (dy / dist) * rep
 				dispX[i] += ux
@@ -482,11 +513,9 @@ func layoutGraph(nodes []graphNode, edges []graphEdge) {
 			if dist < 0.001 {
 				continue
 			}
-			weight := 1.0
+			weight := 0.55
 			if e.Kind == edgeLink {
-				weight = 1.35
-			} else {
-				weight = 0.85
+				weight = 1.05
 			}
 			attr := (dist * dist / k) * weight
 			ux := (dx / dist) * attr * aspectX
@@ -497,20 +526,17 @@ func layoutGraph(nodes []graphNode, edges []graphEdge) {
 			dispY[e.To] += uy
 		}
 
-		// Center gravity prevents disconnected nodes from drifting away.
+		// Gentle center gravity keeps disconnected components near the main cluster.
 		for i := 0; i < n; i++ {
-			grav := 0.045
+			grav := 0.012
 			if deg[i] == 0 {
-				grav = 0.09
+				grav = 0.032
 			}
 			dispX[i] -= posX[i] * grav
 			dispY[i] -= posY[i] * grav
 		}
 
-		temp := 0.35 * (1.0 - float64(iter)/float64(iterations))
-		if temp < 0.01 {
-			temp = 0.01
-		}
+		temp := math.Max(0.01, startTemp*(1.0-float64(iter)/float64(iterations)))
 		for i := 0; i < n; i++ {
 			d := math.Hypot(dispX[i], dispY[i])
 			if d > 0 {
@@ -529,11 +555,97 @@ func layoutGraph(nodes []graphNode, edges []graphEdge) {
 		minY = math.Min(minY, posY[i])
 		maxY = math.Max(maxY, posY[i])
 	}
-	spanX := math.Max(maxX-minX, 1e-6)
-	spanY := math.Max(maxY-minY, 1e-6)
+	midX := (minX + maxX) / 2.0
+	midY := (minY + maxY) / 2.0
+	spanX := maxX - minX
+	spanY := maxY - minY
+
+	// Scale world span smoothly for larger graphs so nodes keep terminal label breathing room.
+	spread := 1.0
+	if n > 8 {
+		spread = math.Min(3.4, math.Sqrt(float64(n)/6.0))
+	}
 	for i := 0; i < n; i++ {
-		nodes[i].X = (posX[i] - minX) / spanX
-		nodes[i].Y = (posY[i] - minY) / spanY
+		if spanX < 1e-4 {
+			nodes[i].X = 0.5
+		} else {
+			nodes[i].X = 0.5 + ((posX[i]-midX)/spanX)*spread
+		}
+		if spanY < 1e-4 {
+			nodes[i].Y = 0.5
+		} else {
+			nodes[i].Y = 0.5 + ((posY[i]-midY)/spanY)*spread
+		}
+	}
+
+	separateCloseNodes(nodes, n <= 8)
+}
+
+func separateCloseNodes(nodes []graphNode, clampToUnit bool) {
+	n := len(nodes)
+	if n <= 1 {
+		return
+	}
+	minDX := 0.26
+	minDY := 0.24
+	if clampToUnit {
+		minDX = 0.22
+		minDY = 0.20
+	}
+
+	const passes = 45
+	for pass := 0; pass < passes; pass++ {
+		moved := false
+		for i := 0; i < n; i++ {
+			for j := i + 1; j < n; j++ {
+				dx := nodes[i].X - nodes[j].X
+				dy := nodes[i].Y - nodes[j].Y
+				nx := dx / minDX
+				ny := dy / minDY
+				d := math.Hypot(nx, ny)
+				if d >= 1.0 {
+					continue
+				}
+				moved = true
+				if d < 1e-4 {
+					angle := float64((i*7+j*13)%16) * (math.Pi / 8.0)
+					nx = math.Cos(angle)
+					ny = math.Sin(angle)
+					d = 1.0
+				} else {
+					nx /= d
+					ny /= d
+				}
+				push := (1.0 - d) * 0.52
+				nodes[i].X += nx * minDX * push
+				nodes[i].Y += ny * minDY * push
+				nodes[j].X -= nx * minDX * push
+				nodes[j].Y -= ny * minDY * push
+			}
+		}
+		if clampToUnit {
+			for i := 0; i < n; i++ {
+				nodes[i].X = math.Min(0.96, math.Max(0.04, nodes[i].X))
+				nodes[i].Y = math.Min(0.96, math.Max(0.04, nodes[i].Y))
+			}
+		}
+		if !moved {
+			break
+		}
+	}
+
+	if !clampToUnit {
+		var sumX, sumY float64
+		for i := 0; i < n; i++ {
+			sumX += nodes[i].X
+			sumY += nodes[i].Y
+		}
+		shiftX := 0.5 - sumX/float64(n)
+		shiftY := 0.5 - sumY/float64(n)
+		for i := 0; i < n; i++ {
+			nodes[i].X += shiftX
+			nodes[i].Y += shiftY
+		}
 	}
 }
 
@@ -552,16 +664,21 @@ func (m Model) graphPaneWidths() (leftPaneW, rightPaneW, canvasW, canvasH int) {
 	return leftPaneW, rightPaneW, canvasW, canvasH
 }
 
+func graphUsableSize(canvasW, canvasH int) (usableW, usableH float64) {
+	const padX = 3.0
+	const padY = 1.0
+	usableW = math.Max(4.0, float64(canvasW)-padX*2-1)
+	usableH = math.Max(3.0, float64(canvasH)-padY*2-1)
+	return usableW, usableH
+}
+
 func (m *Model) projectGraph() {
 	_, _, canvasW, canvasH := m.graphPaneWidths()
 	g := &m.graph
 	g.CanvasW = canvasW
 	g.CanvasH = canvasH
 
-	padX := 3.0
-	padY := 1.0
-	usableW := math.Max(4.0, float64(canvasW)-padX*2-1)
-	usableH := math.Max(3.0, float64(canvasH)-padY*2-1)
+	usableW, usableH := graphUsableSize(canvasW, canvasH)
 	centerX := float64(canvasW) / 2.0
 	centerY := float64(canvasH) / 2.0
 
@@ -646,14 +763,18 @@ func (m *Model) stepGraphSelection(delta int) {
 	m.selectGraphNode(next)
 }
 
-func (m *Model) adjustGraphZoom(factor float64) {
-	next := m.graph.Zoom * factor
-	if next < 0.5 {
-		next = 0.5
-	} else if next > 3.0 {
-		next = 3.0
+func clampGraphZoom(z float64) float64 {
+	if z < 0.2 {
+		return 0.2
 	}
-	m.graph.Zoom = next
+	if z > 4.0 {
+		return 4.0
+	}
+	return z
+}
+
+func (m *Model) adjustGraphZoom(factor float64) {
+	m.graph.Zoom = clampGraphZoom(m.graph.Zoom * factor)
 	m.projectGraph()
 }
 
@@ -661,6 +782,44 @@ func (m *Model) resetGraphCamera() {
 	m.graph.Zoom = 1.0
 	m.graph.PanX = 0
 	m.graph.PanY = 0
+	m.projectGraph()
+}
+
+func (m *Model) fitGraphToView() {
+	n := len(m.graph.Nodes)
+	if n == 0 {
+		return
+	}
+	if n == 1 {
+		m.graph.PanX = m.graph.Nodes[0].X - 0.5
+		m.graph.PanY = m.graph.Nodes[0].Y - 0.5
+		m.graph.Zoom = 1.0
+		m.projectGraph()
+		return
+	}
+	minX, maxX := m.graph.Nodes[0].X, m.graph.Nodes[0].X
+	minY, maxY := m.graph.Nodes[0].Y, m.graph.Nodes[0].Y
+	for _, node := range m.graph.Nodes[1:] {
+		minX = math.Min(minX, node.X)
+		maxX = math.Max(maxX, node.X)
+		minY = math.Min(minY, node.Y)
+		maxY = math.Max(maxY, node.Y)
+	}
+	m.graph.PanX = (minX+maxX)/2.0 - 0.5
+	m.graph.PanY = (minY+maxY)/2.0 - 0.5
+	span := math.Max(maxX-minX, maxY-minY)
+	zoom := 1.0
+	if span > 1e-4 {
+		zoom = 0.92 / span
+	}
+	m.graph.Zoom = clampGraphZoom(zoom)
+	m.projectGraph()
+}
+
+func (m *Model) resetGraphLayout() {
+	m.graph.PinnedPositions = map[string][2]float64{}
+	m.graph.clearDrag()
+	layoutGraph(m.graph.Nodes, m.graph.Edges)
 	m.projectGraph()
 }
 
@@ -769,7 +928,8 @@ func (m Model) buildGraphToolbar(canvasW int) (string, []graphToolbarButton) {
 	btnZoomOut := lipgloss.NewStyle().Foreground(fxFgAuto).Render("[-]")
 	zoomLabel := lipgloss.NewStyle().Foreground(fxFgDim).Render(fmt.Sprintf("%.1fx", m.graph.Zoom))
 	btnZoomIn := lipgloss.NewStyle().Foreground(fxFgAuto).Render("[+]")
-	btnFit := lipgloss.NewStyle().Foreground(fxFgAuto).Render("[0 Fit]")
+	btnReset := lipgloss.NewStyle().Foreground(fxFgAuto).Render("[0 1x]")
+	btnFit := lipgloss.NewStyle().Foreground(fxFgAuto).Render("[F Fit]")
 	stats := lipgloss.NewStyle().Foreground(fxFgDim).Render(fmt.Sprintf("%dN·%dE", len(m.graph.Nodes), len(m.graph.Edges)))
 
 	parts := []struct {
@@ -781,6 +941,7 @@ func (m Model) buildGraphToolbar(canvasW int) (string, []graphToolbarButton) {
 		{"zoom_out", btnZoomOut},
 		{"", zoomLabel},
 		{"zoom_in", btnZoomIn},
+		{"reset", btnReset},
 		{"fit", btnFit},
 		{"", stats},
 	}
@@ -895,27 +1056,34 @@ func planLabelPlacements(g graphState, canvasW, canvasH int) []labelPlacement {
 			continue
 		}
 
-		// Try right of node, then left of node.
-		candidates := []int{n.ScreenX + 2, n.ScreenX - lw - 1}
-		for _, startX := range candidates {
-			if startX < 0 || startX+lw > canvasW {
+		// Try right, left, below, then above so dense clusters still preserve labels.
+		centeredX := min(max(0, n.ScreenX-lw/2), max(0, canvasW-lw))
+		candidates := [][2]int{
+			{n.ScreenX + 2, n.ScreenY},
+			{n.ScreenX - lw - 1, n.ScreenY},
+			{centeredX, n.ScreenY + 1},
+			{centeredX, n.ScreenY - 1},
+		}
+		for _, pos := range candidates {
+			startX, rowY := pos[0], pos[1]
+			if rowY < 0 || rowY >= canvasH || startX < 0 || startX+lw > canvasW {
 				continue
 			}
 			clear := true
-			for x := startX; x < startX+lw; x++ {
-				if occupied[n.ScreenY][x] {
+			for x := max(0, startX-1); x < min(canvasW, startX+lw+1); x++ {
+				if occupied[rowY][x] {
 					clear = false
 					break
 				}
 			}
 			if clear {
 				for x := max(0, startX-1); x < min(canvasW, startX+lw+1); x++ {
-					occupied[n.ScreenY][x] = true
+					occupied[rowY][x] = true
 				}
 				placed = append(placed, labelPlacement{
 					nodeIdx: idx,
 					x:       startX,
-					y:       n.ScreenY,
+					y:       rowY,
 					text:    label,
 					active:  idx == g.SelectedIdx || isNeighbor[idx],
 				})
@@ -1050,10 +1218,13 @@ func renderGraphCanvas(g graphState, canvasW, canvasH int) string {
 }
 
 func drawBrailleLine(grid [][]canvasCell, w, h, x0, y0, x1, y1 int, col lipgloss.Color, prio int) {
-	px0 := x0*2 + 1
-	py0 := y0*4 + 2
-	px1 := x1*2 + 1
-	py1 := y1*4 + 2
+	if w <= 0 || h <= 0 {
+		return
+	}
+	px0, py0, px1, py1, ok := clipBrailleSegment(x0*2+1, y0*4+2, x1*2+1, y1*4+2, w*2-1, h*4-1)
+	if !ok {
+		return
+	}
 
 	dx := px1 - px0
 	if dx < 0 {
@@ -1098,6 +1269,57 @@ func drawBrailleLine(grid [][]canvasCell, w, h, x0, y0, x1, y1 int, col lipgloss
 			py += sy
 		}
 	}
+}
+
+func clipBrailleSegment(x0, y0, x1, y1, maxX, maxY int) (int, int, int, int, bool) {
+	if (x0 < 0 && x1 < 0) || (x0 > maxX && x1 > maxX) || (y0 < 0 && y1 < 0) || (y0 > maxY && y1 > maxY) {
+		return 0, 0, 0, 0, false
+	}
+	if x0 >= 0 && x0 <= maxX && y0 >= 0 && y0 <= maxY && x1 >= 0 && x1 <= maxX && y1 >= 0 && y1 <= maxY {
+		return x0, y0, x1, y1, true
+	}
+
+	// Liang-Barsky parametric clipping keeps off-screen endpoints from walking huge pixel spans.
+	dx := float64(x1 - x0)
+	dy := float64(y1 - y0)
+	t0, t1 := 0.0, 1.0
+	edges := [4][2]float64{
+		{-dx, float64(x0)},
+		{dx, float64(maxX - x0)},
+		{-dy, float64(y0)},
+		{dy, float64(maxY - y0)},
+	}
+	for _, edge := range edges {
+		p, q := edge[0], edge[1]
+		if p == 0 {
+			if q < 0 {
+				return 0, 0, 0, 0, false
+			}
+			continue
+		}
+		r := q / p
+		if p < 0 {
+			if r > t1 {
+				return 0, 0, 0, 0, false
+			}
+			if r > t0 {
+				t0 = r
+			}
+		} else {
+			if r < t0 {
+				return 0, 0, 0, 0, false
+			}
+			if r < t1 {
+				t1 = r
+			}
+		}
+	}
+
+	cx0 := int(math.Round(float64(x0) + t0*dx))
+	cy0 := int(math.Round(float64(y0) + t0*dy))
+	cx1 := int(math.Round(float64(x0) + t1*dx))
+	cy1 := int(math.Round(float64(y0) + t1*dy))
+	return cx0, cy0, cx1, cy1, true
 }
 
 func renderCanvasRow(row []canvasCell) string {
@@ -1279,6 +1501,15 @@ func (m Model) handleGraphKey(key string) (Model, tea.Cmd) {
 		m.resetGraphCamera()
 		m.refreshGraphHitboxes()
 		return m, nil
+	case "F":
+		m.fitGraphToView()
+		m.refreshGraphHitboxes()
+		return m, nil
+	case "R":
+		m.resetGraphLayout()
+		m.refreshGraphHitboxes()
+		m.statusText = "Graph layout reset."
+		return m, nil
 	case "f":
 		m.centerGraphOnSelected()
 		m.refreshGraphHitboxes()
@@ -1346,6 +1577,87 @@ func (m Model) handleGraphKey(key string) (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) hitTestGraphCanvas(cx, cy int) int {
+	for _, lh := range m.graph.LabelHits {
+		if cy == lh.Y && cx >= lh.StartX && cx < lh.EndX {
+			return lh.NodeIdx
+		}
+	}
+	bestIdx := -1
+	bestDist := 999.0
+	for i, n := range m.graph.Nodes {
+		if !n.Visible {
+			continue
+		}
+		dx := float64(cx - n.ScreenX)
+		dy := float64(cy-n.ScreenY) * 1.8
+		d := math.Hypot(dx, dy)
+		if d <= 2.3 && d < bestDist {
+			bestDist = d
+			bestIdx = i
+		}
+	}
+	return bestIdx
+}
+
+func (m *Model) applyGraphDrag(screenX, screenY, canvasW, canvasH int) {
+	if m.graph.DragMode == dragNone {
+		return
+	}
+	usableW, usableH := graphUsableSize(canvasW, canvasH)
+	scaleX := usableW * m.graph.Zoom
+	scaleY := usableH * m.graph.Zoom
+	if scaleX <= 0 || scaleY <= 0 {
+		return
+	}
+
+	switch m.graph.DragMode {
+	case dragNode:
+		idx := m.graph.DragNodeIdx
+		if idx < 0 || idx >= len(m.graph.Nodes) {
+			m.graph.clearDrag()
+			return
+		}
+		tx := min(max(screenX, 2), 2+canvasW-1)
+		ty := min(max(screenY, 9), 9+canvasH-1)
+		dx := tx - m.graph.DragStartScreenX
+		dy := ty - m.graph.DragStartScreenY
+		if dx != 0 || dy != 0 {
+			m.graph.DragMoved = true
+		}
+		m.graph.Nodes[idx].X = m.graph.DragStartX + float64(dx)/scaleX
+		m.graph.Nodes[idx].Y = m.graph.DragStartY + float64(dy)/scaleY
+		m.projectGraph()
+		m.refreshGraphHitboxes()
+	case dragPan:
+		dx := screenX - m.graph.DragStartScreenX
+		dy := screenY - m.graph.DragStartScreenY
+		if dx != 0 || dy != 0 {
+			m.graph.DragMoved = true
+		}
+		m.graph.PanX = m.graph.DragStartX - float64(dx)/scaleX
+		m.graph.PanY = m.graph.DragStartY - float64(dy)/scaleY
+		m.projectGraph()
+		m.refreshGraphHitboxes()
+	}
+}
+
+func (m *Model) finishGraphDrag() {
+	if m.graph.DragMode == dragNode && m.graph.DragMoved {
+		idx := m.graph.DragNodeIdx
+		if idx >= 0 && idx < len(m.graph.Nodes) {
+			n := m.graph.Nodes[idx]
+			if m.graph.PinnedPositions == nil {
+				m.graph.PinnedPositions = map[string][2]float64{}
+			}
+			m.graph.PinnedPositions[n.ID] = [2]float64{n.X, n.Y}
+			m.statusText = fmt.Sprintf("Moved %s (R to relayout)", n.Title)
+		}
+	}
+	m.graph.clearDrag()
+	m.refreshGraphHitboxes()
+}
+
 func (m Model) handleGraphMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	leftPaneW, _, canvasW, canvasH := m.graphPaneWidths()
 	leftOuterEnd := leftPaneW + 2
@@ -1365,9 +1677,23 @@ func (m Model) handleGraphMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if msg.Action == tea.MouseActionMotion {
+		m.applyGraphDrag(msg.X, msg.Y, canvasW, canvasH)
+		return m, nil
+	}
+
+	if msg.Action == tea.MouseActionRelease {
+		if m.graph.DragMode != dragNone && (msg.Button == tea.MouseButtonLeft || msg.Button == tea.MouseButtonNone) {
+			m.finishGraphDrag()
+		}
+		return m, nil
+	}
+
 	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 		return m, nil
 	}
+
+	m.graph.clearDrag()
 
 	// Toolbar sits on Y = 7 (pane border at Y=6).
 	if msg.Y == 7 && msg.X < leftOuterEnd {
@@ -1384,8 +1710,10 @@ func (m Model) handleGraphMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 					m.adjustGraphZoom(1.25)
 				case "zoom_out":
 					m.adjustGraphZoom(0.8)
-				case "fit":
+				case "reset":
 					m.resetGraphCamera()
+				case "fit":
+					m.fitGraphToView()
 				}
 				m.refreshGraphHitboxes()
 				return m, nil
@@ -1396,32 +1724,27 @@ func (m Model) handleGraphMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 
 	// Canvas spans X in [2, 2+canvasW), Y in [9, 9+canvasH).
 	if msg.X >= 2 && msg.X < 2+canvasW && msg.Y >= 9 && msg.Y < 9+canvasH {
-		cx := msg.X - 2
-		cy := msg.Y - 9
-		for _, lh := range m.graph.LabelHits {
-			if cy == lh.Y && cx >= lh.StartX && cx < lh.EndX {
-				m.selectGraphNode(lh.NodeIdx)
-				m.refreshGraphHitboxes()
-				return m, nil
-			}
-		}
-		bestIdx := -1
-		bestDist := 999.0
-		for i, n := range m.graph.Nodes {
-			if !n.Visible {
-				continue
-			}
-			dx := float64(cx - n.ScreenX)
-			dy := float64(cy-n.ScreenY) * 1.8
-			d := math.Hypot(dx, dy)
-			if d <= 2.3 && d < bestDist {
-				bestDist = d
-				bestIdx = i
-			}
-		}
-		if bestIdx != -1 {
-			m.selectGraphNode(bestIdx)
+		hitIdx := m.hitTestGraphCanvas(msg.X-2, msg.Y-9)
+		if hitIdx != -1 {
+			m.selectGraphNode(hitIdx)
 			m.refreshGraphHitboxes()
+			m.graph.DragMode = dragNode
+			m.graph.DragNodeIdx = hitIdx
+			m.graph.DragMoved = false
+			m.graph.DragStartScreenX = msg.X
+			m.graph.DragStartScreenY = msg.Y
+			m.graph.DragStartX = m.graph.Nodes[hitIdx].X
+			m.graph.DragStartY = m.graph.Nodes[hitIdx].Y
+			return m, nil
+		}
+		if len(m.graph.Nodes) > 0 {
+			m.graph.DragMode = dragPan
+			m.graph.DragNodeIdx = -1
+			m.graph.DragMoved = false
+			m.graph.DragStartScreenX = msg.X
+			m.graph.DragStartScreenY = msg.Y
+			m.graph.DragStartX = m.graph.PanX
+			m.graph.DragStartY = m.graph.PanY
 		}
 		return m, nil
 	}
